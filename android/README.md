@@ -1,6 +1,8 @@
 # Android app
 
-Kotlin + Jetpack Compose. Screens: Today (events, dinner, chores), Meals,
-Chores, Notes, Memos. Built by GitHub Actions into a sideloadable APK.
+Kotlin + Jetpack Compose. Signs in with the phone's Google account and uses
+the Google Calendar API on the Family calendar (see
+../docs/calendar-conventions.md). Screens: Today, Dinner, Chores, Memos, Notes.
+Built by GitHub Actions into a sideloadable APK.
 
 Not scaffolded yet.

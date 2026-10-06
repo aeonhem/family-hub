@@ -1,5 +1,6 @@
 """Discord bot that gives Erlina the family hub on her iPhone.
 
+Reads and writes the Family Google Calendar (see docs/calendar-conventions.md).
 Planned commands: /today, /dinner, /chores (with tick buttons), /memo.
 New memos addressed to Erlina are delivered as DMs.
 """

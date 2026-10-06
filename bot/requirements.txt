@@ -1,4 +1,4 @@
 discord.py>=2.4
-firebase-admin>=6.5
 google-api-python-client>=2.140
+google-auth>=2.30
 python-dotenv>=1.0

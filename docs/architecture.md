@@ -7,44 +7,47 @@
 3. **Notes / memos**: general family comms; a memo pushes a notification.
 4. **Calendar**: shared family events.
 
-## Pieces
+## Google Calendar is the backend
+
+Everything is an event on the **Family** calendar that Google creates for a
+Google family group. Julian and Sally already see it, so on day one dinner,
+chores and memos appear in the Calendar app they use with no install at all.
 
 ```
-            ┌──────────────────────────┐
-            │   Firebase (free tier)   │
-            │  Firestore: meals,       │
-            │  chores, notes, memos    │
-            │  FCM: push to Android    │
-            └─────┬──────────────┬─────┘
-                  │              │
-     ┌────────────┴───┐   ┌──────┴─────────────┐
-     │ Android app    │   │ Discord bot        │
-     │ (Julian, Sally)│   │ (Erlina, iPhone)   │
-     └────────┬───────┘   └──────┬─────────────┘
-              │                  │
-            ┌─┴──────────────────┴─┐
-            │ Google Calendar:     │
-            │ shared "Family" cal  │
-            └──────────────────────┘
+          ┌──────────────────────────────────┐
+          │  Google Calendar: "Family"       │
+          │  events, 🍽 dinners, ☐/✅ chores, │
+          │  📣 memos, 📝 notes               │
+          └──────┬──────────────────┬────────┘
+                 │ Calendar API     │ Calendar API (service account)
+       ┌─────────┴───────┐   ┌──────┴─────────────┐
+       │ Android app     │   │ Discord bot        │
+       │ (Julian, Sally) │   │ (Erlina, iPhone)   │
+       └─────────────────┘   └────────────────────┘
 ```
 
-- **Shared data** lives in Firestore. Real-time listeners keep every phone in
-  sync without a server of our own.
-- **Calendar** stays in Google Calendar, because Julian and Sally already use
-  it. A dedicated "Family" calendar is shared between them; the app shows it
-  next to dinner and chores. The bot reads it (service account) for Erlina.
-- **Push**: Android gets memos via Firebase Cloud Messaging. Erlina gets them
-  as Discord DMs, which arrive as normal iPhone notifications.
+- **Storage and sync**: Google Calendar. Edits on any device show everywhere.
+- **Push to Android**: Google Calendar's own reminders. A memo is an event
+  with a popup reminder at 0 minutes, so it buzzes Julian's and Sally's phones.
+- **Push to Erlina**: the bot polls the calendar and DMs her anything new
+  addressed to her. Discord DMs are normal iPhone notifications.
+- **The Android app** reads and writes the same calendar and shows it as
+  Today / Dinner / Chores / Memos, with proper tick boxes. Signs in with the
+  phone's Google account.
 - **Distribution**: GitHub Actions builds the APK; download and sideload it.
 
-## Why not...
+How each thing is stored as an event is in
+[calendar-conventions.md](calendar-conventions.md).
 
-- **A web app**: needs hosting/a domain (ruled out).
-- **An iOS app**: needs a paid Apple developer account to install outside
-  TestFlight/App Store. Discord gives Erlina push + buttons for free.
-- **Google Sheets as the database**: tempting, but no real-time sync or push.
+## Why this shape
 
-## Open questions
+- No server or database to run, back up, or pay for.
+- Julian and Sally get value before the app exists.
+- Erlina doesn't need a Google account; the bot reads the calendar for her.
 
-- Where the bot runs 24/7: a home PC, a Raspberry Pi, or a free cloud VM.
-- Whether Erlina should see the whole calendar or only events she's in.
+## Trade-offs
+
+- Notes are a stretch for a calendar (they're stored as all-day events).
+- Ticking a chore renames the event; the app and bot hide that detail.
+- The bot needs to run somewhere all the time (home PC, Raspberry Pi, or a
+  free cloud VM). Still open.
