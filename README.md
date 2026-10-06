@@ -4,8 +4,7 @@ One place for Julian, Sally and Erlina to see what's on, what's for dinner,
 what chores need doing (and tick them off), and to send each other memos.
 
 Everything lives in the existing **Family** Google Calendar, so it already
-shows up (with notifications) in Google Calendar on Julian's and Sally's
-phones. The app and the bot are friendlier front ends on top of it.
+shows up in Google Calendar on Julian's and Sally's phones. The app and the bot are friendlier front ends on top of it.
 
 | Who | How they use it |
 |---|---|

@@ -10,7 +10,9 @@ import sys
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+# Events only: enough to read and write the Family calendar, but can't
+# change who calendars are shared with.
+SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
 if __name__ == "__main__":
     secrets = sys.argv[1] if len(sys.argv) > 1 else "client_secret.json"

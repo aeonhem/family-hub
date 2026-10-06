@@ -30,6 +30,11 @@ class Item:
     done: bool = False
     meta: dict[str, str] = field(default_factory=dict)
     note: str = ""
+    end_day: date | None = None  # last day it covers; None means just [day]
+
+    def covers(self, d: date) -> bool:
+        """True when the event is on [d], including the middle of a multi-day event."""
+        return self.day <= d <= (self.end_day or self.day)
 
     @property
     def for_who(self) -> str | None:
@@ -42,6 +47,10 @@ class Item:
     @property
     def cook(self) -> str | None:
         return self.meta.get("cook")
+
+    @property
+    def done_by(self) -> str | None:
+        return self.meta.get("done-by")
 
     def is_for(self, name: str) -> bool:
         """True when addressed to [name], to everyone, or to nobody in particular."""
@@ -85,13 +94,21 @@ def build_description(meta: dict[str, str | None], note: str = "") -> str:
 def parse_event(ev: dict, tz: ZoneInfo) -> Item:
     kind, done, title = parse_title(ev.get("summary", ""))
     meta, note = parse_description(ev.get("description"))
-    start = ev.get("start", {})
+    start, end = ev.get("start", {}), ev.get("end", {})
     if "dateTime" in start:
-        dt = datetime.fromisoformat(start["dateTime"].replace("Z", "+00:00")).astimezone(tz)
+        dt = _local(start["dateTime"], tz)
         day, start_dt = dt.date(), dt
+        # An event ending exactly at midnight doesn't cover the next day.
+        end_day = (_local(end["dateTime"], tz) - timedelta(microseconds=1)).date() if "dateTime" in end else day
     else:
         day, start_dt = date.fromisoformat(start["date"]), None
-    return Item(ev["id"], kind, title, day, start_dt, done, meta, note)
+        # All-day end dates are exclusive.
+        end_day = date.fromisoformat(end["date"]) - timedelta(days=1) if "date" in end else day
+    return Item(ev["id"], kind, title, day, start_dt, done, meta, note, max(end_day, day))
+
+
+def _local(stamp: str, tz: ZoneInfo) -> datetime:
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(tz)
 
 
 class FamilyCalendar:
@@ -103,7 +120,7 @@ class FamilyCalendar:
         self.tz = tz
 
     def items(self, start: date, end: date) -> list[Item]:
-        """Every event whose local day is in start..end (inclusive)."""
+        """Every event on any local day in start..end (inclusive)."""
         time_min = datetime.combine(start - timedelta(days=1), time.min, self.tz).isoformat()
         time_max = datetime.combine(end + timedelta(days=2), time.min, self.tz).isoformat()
         out: list[Item] = []
@@ -117,7 +134,7 @@ class FamilyCalendar:
                 if ev.get("status") == "cancelled":
                     continue
                 item = parse_event(ev, self.tz)
-                if start <= item.day <= end:
+                if item.day <= end and (item.end_day or item.day) >= start:
                     out.append(item)
             page = resp.get("nextPageToken")
             if not page:
@@ -133,6 +150,9 @@ class FamilyCalendar:
         ).execute()
 
     def send_memo(self, body: str, sender: str, to: str) -> None:
+        """The Android app notifies the people it's for. No calendar reminder:
+        Google keeps reminders per person, so one here would only buzz the
+        account the bot signs in as."""
         start = datetime.now(self.tz) + timedelta(minutes=1)
         self.service.events().insert(
             calendarId=self.calendar_id,
@@ -141,7 +161,7 @@ class FamilyCalendar:
                 "description": build_description({"from": sender, "for": to}),
                 "start": {"dateTime": start.isoformat()},
                 "end": {"dateTime": (start + timedelta(minutes=5)).isoformat()},
-                "reminders": {"useDefault": False, "overrides": [{"method": "popup", "minutes": 0}]},
+                "reminders": {"useDefault": False, "overrides": []},
             },
         ).execute()
 

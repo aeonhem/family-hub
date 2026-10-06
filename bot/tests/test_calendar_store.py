@@ -38,3 +38,12 @@ def test_is_for():
     memo = cs.Item("m", "memo", "hi", date(2026, 10, 6), None, meta={"for": "Sally"})
     assert not memo.is_for("Erlina")
     assert cs.Item("m", "memo", "hi", date(2026, 10, 6), None).is_for("Erlina")
+
+
+def test_multi_day_and_midnight_end():
+    camp = cs.parse_event({"id": "c", "summary": "Camp", "start": {"date": "2026-10-05"},
+                           "end": {"date": "2026-10-10"}}, TZ)
+    assert camp.end_day == date(2026, 10, 9) and camp.covers(date(2026, 10, 7))
+    party = cs.parse_event({"id": "p", "summary": "Party", "start": {"dateTime": "2026-10-06T19:00:00+10:00"},
+                            "end": {"dateTime": "2026-10-07T00:00:00+10:00"}}, TZ)
+    assert party.end_day == date(2026, 10, 6) and not party.covers(date(2026, 10, 7))
