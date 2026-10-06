@@ -1,0 +1,14 @@
+[Unit]
+Description=Family Hub Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=familyhub
+WorkingDirectory=/opt/family-hub/bot
+ExecStart=/opt/family-hub/bot/.venv/bin/python bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
