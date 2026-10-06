@@ -19,7 +19,7 @@ chores and memos appear in the Calendar app they use with no install at all.
           │  events, 🍽 dinners, ☐/✅ chores, │
           │  📣 memos, 📝 notes               │
           └──────┬──────────────────┬────────┘
-                 │ phone calendar   │ Calendar API (service account)
+                 │ phone calendar   │ Calendar API (your Google sign-in)
        ┌─────────┴───────┐   ┌──────┴─────────────┐
        │ Android app     │   │ Discord bot        │
        │ (Julian, Sally) │   │ (Erlina, iPhone)   │
@@ -43,11 +43,11 @@ How each thing is stored as an event is in
 
 - No server or database to run, back up, or pay for.
 - Julian and Sally get value before the app exists.
-- Erlina doesn't need a Google account; the bot reads the calendar for her.
+- Erlina doesn't need a Google account; the bot reads the calendar for her,
+  signed in once as Julian (family calendars can't be shared outside the family).
 
 ## Trade-offs
 
 - Notes are a stretch for a calendar (they're stored as all-day events).
 - Ticking a chore renames the event; the app and bot hide that detail.
-- The bot needs to run somewhere all the time (home PC, Raspberry Pi, or a
-  free cloud VM). Still open.
+- The bot runs on a free Oracle Cloud server (Always Free tier).

@@ -1,4 +1,5 @@
-discord.py>=2.4
+discord.py>=2.4,<3
 google-api-python-client>=2.140
 google-auth>=2.30
+google-auth-oauthlib>=1.2
 python-dotenv>=1.0

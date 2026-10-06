@@ -10,7 +10,7 @@ phones. The app and the bot are friendlier front ends on top of it.
 | Who | How they use it |
 |---|---|
 | Julian, Sally (Android) | Google Calendar as-is, plus a sideloaded app with Today / Dinner / Chores / Memos tabs |
-| Erlina (iPhone) | Discord bot: DMs for memos, buttons to tick chores, `/today` etc. |
+| Erlina (iPhone) | Discord bot on a free cloud server: morning DM, memos, buttons to tick chores, `/today` etc. |
 
 No web app, no paid domain, no database of our own.
 

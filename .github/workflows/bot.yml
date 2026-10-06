@@ -1,0 +1,23 @@
+name: Discord bot
+
+on:
+  push:
+    branches: [main]
+    paths: ["bot/**", ".github/workflows/bot.yml"]
+  pull_request:
+    paths: ["bot/**", ".github/workflows/bot.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest pyflakes
+      - run: python -m pyflakes bot.py calendar_store.py authorize.py
+      - run: python -m pytest -q tests
