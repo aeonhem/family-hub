@@ -11,3 +11,4 @@ local.properties
 *.apk
 *.keystore
 .idea/
+!android/app/familyhub-debug.keystore

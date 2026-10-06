@@ -12,15 +12,23 @@ create them by hand in Google Calendar using the same title prefix.
 | Memo | 5-minute event at send time, popup reminder at 0 min | `📣 Pick up milk on the way home` |
 | Note | All-day event on the day written | `📝 Wi-Fi password changed` |
 
-Extra structure goes in the event's private `extendedProperties`, which
-Google Calendar keeps but doesn't display:
+Extra structure goes in the event description as `key: value` lines, one per
+line, which anyone can read or edit in Google Calendar:
 
 | Key | Used on | Values |
 |---|---|---|
-| `fh_type` | all | `dinner`, `chore`, `memo`, `note` |
-| `fh_for` | chore, memo | `julian`, `sally`, `erlina`, `all` |
-| `fh_done_by` | chore | who ticked it |
-| `fh_from` | memo, note | who sent it |
+| `for` | chore, memo | `Julian`, `Sally`, `Erlina`, `Everyone` |
+| `from` | chore, memo, note | who created it |
+| `cook` | dinner | who is cooking, or `Takeaway` |
+| `done-by` | chore | who ticked it |
 
-The title prefix is the source of truth so hand-made events still work;
-`extendedProperties` just make filtering cheap and reliable.
+Example chore description:
+
+```
+for: Erlina
+from: Sally
+```
+
+The title prefix decides what kind of thing an event is, so events made by
+hand in Google Calendar still work. (Private `extendedProperties` were the
+first idea, but Android apps can't write those through the phone's calendar.)
