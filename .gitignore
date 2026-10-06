@@ -1,0 +1,13 @@
+.env
+service-account*.json
+google-services.json
+__pycache__/
+*.pyc
+.venv/
+# Android
+.gradle/
+build/
+local.properties
+*.apk
+*.keystore
+.idea/
