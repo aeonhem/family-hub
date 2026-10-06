@@ -49,7 +49,6 @@ import com.aeonhem.familyhub.data.Item
 import com.aeonhem.familyhub.data.Kind
 import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -65,12 +64,13 @@ private val DEFAULT_DINNER_TIME: LocalTime = LocalTime.of(18, 0)
 @Composable
 fun TodayScreen(s: HubState, vm: HubViewModel) {
     val today = LocalDate.now()
-    val dinner = s.items.firstOrNull { it.kind == Kind.DINNER && it.date == today }
-    val chores = choresFor(s.items, today) { it.date == today || (!it.done && it.date < today) }
-    val now = LocalDateTime.now()
+    val dinner = s.items.firstOrNull { it.kind == Kind.DINNER && it.covers(today) }
+    val chores = choresFor(s.items) { it.covers(today) || (!it.done && it.endDate < today) }
+    // Anything not over yet, so a Mon-Fri camp shows every day it runs.
+    val now = System.currentTimeMillis()
     val comingUp = s.items.filter {
         it.kind == Kind.EVENT && it.date <= today.plusDays(7) &&
-            (if (it.allDay) it.date >= today else it.start!! >= now)
+            (if (it.allDay) it.endDate >= today else it.end > now)
     }.take(5)
     val memo = s.items.filter { it.kind == Kind.MEMO && it.date >= today.minusDays(7) }.maxByOrNull { it.start ?: it.date.atStartOfDay() }
     var editing by remember { mutableStateOf(false) }
@@ -116,7 +116,7 @@ fun TodayScreen(s: HubState, vm: HubViewModel) {
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     val whenText = when {
                         e.date == today && !e.allDay -> e.start!!.toLocalTime().pretty()
-                        e.date == today -> "Today"
+                        e.covers(today) -> "Today"
                         else -> dayShort(e.date)
                     }
                     Text(whenText, Modifier.width(60.dp), color = Hub.Teal, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -227,9 +227,14 @@ fun ChoresScreen(s: HubState, vm: HubViewModel) {
     val today = LocalDate.now()
     val weekStart = today.with(DayOfWeek.MONDAY)
     val week = (0L..6L).map { weekStart.plusDays(it) }
+    val weekEnd = weekStart.plusDays(6)
     val erlina = s.items.filter { it.kind == Kind.CHORE && it.forWho.equals("Erlina", ignoreCase = true) }
-    val ticked = erlina.count { it.done && it.date >= weekStart && it.date <= weekStart.plusDays(6) }
-    val chores = choresFor(s.items, today) { (it.date >= weekStart && it.date <= weekStart.plusDays(6)) || (!it.done && it.date < weekStart) }
+    // Chores Erlina ticked herself this week, whoever they were for.
+    val ticked = s.items.count {
+        it.kind == Kind.CHORE && it.done && it.doneBy.equals("Erlina", ignoreCase = true) &&
+            it.date <= weekEnd && it.endDate >= weekStart
+    }
+    val chores = choresFor(s.items) { (it.date <= weekEnd && it.endDate >= weekStart) || (!it.done && it.endDate < weekStart) }
     var adding by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -342,7 +347,7 @@ fun MemosScreen(s: HubState, vm: HubViewModel) {
 // ---------- Shared pieces ----------
 
 /** Chores matching [keep], open ones first, then by day. */
-private fun choresFor(items: List<Item>, today: LocalDate, keep: (Item) -> Boolean) =
+private fun choresFor(items: List<Item>, keep: (Item) -> Boolean) =
     items.filter { it.kind == Kind.CHORE && keep(it) }.sortedWith(compareBy({ it.done }, { it.date }, { it.title }))
 
 private fun memoMeta(m: Item, withTo: Boolean = false): String {
@@ -400,8 +405,8 @@ private fun ChoreRow(c: Item, today: LocalDate, showDay: Boolean = false, onTogg
                 textDecoration = if (c.done) TextDecoration.LineThrough else null,
             )
             val dayText = when {
-                !c.done && c.date < today -> "Overdue"
-                c.date == today -> "Today"
+                !c.done && c.endDate < today -> "Overdue"
+                c.covers(today) -> "Today"
                 else -> dayShort(c.date)
             }
             val sub = listOfNotNull(c.forWho ?: "Anyone", if (showDay || dayText == "Overdue") dayText else null,

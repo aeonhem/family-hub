@@ -11,7 +11,10 @@ import androidx.lifecycle.viewModelScope
 import com.aeonhem.familyhub.data.CalendarInfo
 import com.aeonhem.familyhub.data.CalendarRepository
 import com.aeonhem.familyhub.data.Item
+import com.aeonhem.familyhub.notify.MemoJobs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -41,8 +44,18 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(HubState(me = prefs.getString("me", null)))
     val state: StateFlow<HubState> = _state
 
+    private var refreshJob: Job? = null
+    private var pendingChange: Job? = null
+
+    // A sync touches many rows at once; wait for it to settle, then reload once.
     private val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean) = refresh()
+        override fun onChange(selfChange: Boolean) {
+            pendingChange?.cancel()
+            pendingChange = viewModelScope.launch {
+                delay(400)
+                refresh()
+            }
+        }
     }
     private var observing = false
 
@@ -60,7 +73,10 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
             val chosen = cals.firstOrNull { it.id == savedId }
                 ?: cals.filter { it.canWrite && it.name.equals("Family", ignoreCase = true) }.singleOrNull()
             _state.update { it.copy(calendars = cals, calendar = chosen) }
-            chosen?.let { prefs.edit().putLong("calendarId", it.id).apply() }
+            chosen?.let {
+                prefs.edit().putLong("calendarId", it.id).apply()
+                MemoJobs.schedule(getApplication<Application>())
+            }
             refresh()
         }
     }
@@ -73,6 +89,7 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
     fun chooseCalendar(cal: CalendarInfo) {
         prefs.edit().putLong("calendarId", cal.id).apply()
         _state.update { it.copy(calendar = cal) }
+        MemoJobs.schedule(getApplication<Application>())
         refresh()
     }
 
@@ -80,7 +97,9 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
         val cal = _state.value.calendar ?: return
         val today = LocalDate.now()
         val weekStart = today.with(DayOfWeek.MONDAY)
-        viewModelScope.launch {
+        // A newer refresh replaces one still running.
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             _state.update { it.copy(loading = true) }
             val result = withContext(Dispatchers.IO) {
                 runCatching { repo.load(cal.id, weekStart.minusDays(14), today.plusDays(14)) }
@@ -107,7 +126,7 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleChore(item: Item) {
         // Flip it on screen straight away; the calendar write follows.
         _state.update { s ->
-            s.copy(items = s.items.map { if (it.eventId == item.eventId) it.copy(done = !item.done) else it })
+            s.copy(items = s.items.map { if (it.key == item.key) it.copy(done = !item.done) else it })
         }
         write { repo.setChoreDone(it, item, !item.done, _state.value.me) }
     }

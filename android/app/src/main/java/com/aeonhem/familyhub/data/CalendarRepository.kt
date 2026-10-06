@@ -9,7 +9,6 @@ import android.provider.CalendarContract
 import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Instances
-import android.provider.CalendarContract.Reminders
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -57,7 +56,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
         return out
     }
 
-    /** All events on [calendarId] whose local date falls in [from]..[to]. */
+    /** All event occurrences on [calendarId] that overlap [from]..[to] (local dates). */
     fun load(calendarId: Long, from: LocalDate, to: LocalDate): List<Item> {
         // Pad by a day each side: all-day events are stored at UTC midnight,
         // which is a different local day in Brisbane.
@@ -73,6 +72,9 @@ class CalendarRepository(private val resolver: ContentResolver) {
             Instances.DESCRIPTION,
             Instances.BEGIN,
             Instances.ALL_DAY,
+            Instances.END,
+            Instances.RRULE,
+            Instances.RDATE,
         )
         val out = mutableListOf<Item>()
         resolver.query(
@@ -81,16 +83,33 @@ class CalendarRepository(private val resolver: ContentResolver) {
         )?.use { c ->
             while (c.moveToNext()) {
                 val allDay = c.getInt(4) == 1
-                val instant = Instant.ofEpochMilli(c.getLong(3))
+                val beginMs = c.getLong(3)
+                val endMs = if (c.isNull(5)) beginMs else c.getLong(5)
+                val instant = Instant.ofEpochMilli(beginMs)
                 val start = if (allDay) null else LocalDateTime.ofInstant(instant, zone)
                 val date = if (allDay) instant.atZone(ZoneOffset.UTC).toLocalDate() else start!!.toLocalDate()
-                if (date < from || date > to) continue
+                // All-day ends are exclusive UTC midnights; timed ends are exclusive too.
+                val lastDay = if (allDay) Instant.ofEpochMilli(endMs).atZone(ZoneOffset.UTC).toLocalDate().minusDays(1)
+                else LocalDateTime.ofInstant(Instant.ofEpochMilli(endMs - 1), zone).toLocalDate()
+                val endDate = if (lastDay < date) date else lastDay
+                if (endDate < from || date > to) continue
+                val recurring = !c.getString(6).isNullOrBlank() || !c.getString(7).isNullOrBlank()
                 val (kind, done, title) = Item.parseTitle(c.getString(1) ?: "")
                 val (meta, note) = Item.parseDescription(c.getString(2))
-                out += Item(c.getLong(0), kind, title, date, start, allDay, done, meta, note)
+                out += Item(
+                    c.getLong(0), kind, title, date, start, allDay, done, meta, note,
+                    begin = beginMs, end = endMs, endDate = endDate, recurring = recurring,
+                )
             }
         }
         return out
+    }
+
+    /** Memos on [calendarId] that start at or after [sinceMillis]. */
+    fun recentMemos(calendarId: Long, sinceMillis: Long): List<Item> {
+        val today = LocalDate.now(zone)
+        return load(calendarId, today.minusDays(1), today.plusDays(1))
+            .filter { it.kind == Kind.MEMO && it.begin >= sinceMillis }
     }
 
     fun addDinner(cal: CalendarInfo, date: LocalDate, time: LocalTime, meal: String, cook: String?) {
@@ -110,7 +129,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
             put(Events.DTEND, start + 60 * 60_000L)
             put(Events.EVENT_TIMEZONE, zone.id)
         }
-        resolver.update(ContentUris.withAppendedId(Events.CONTENT_URI, item.eventId), values, null, null)
+        updateOccurrence(item, values)
         requestSync(cal)
     }
 
@@ -129,27 +148,34 @@ class CalendarRepository(private val resolver: ContentResolver) {
             put(Events.TITLE, "$prefix ${item.title}")
             put(Events.DESCRIPTION, Item.buildDescription(meta, item.note))
         }
-        resolver.update(ContentUris.withAppendedId(Events.CONTENT_URI, item.eventId), values, null, null)
+        updateOccurrence(item, values)
         requestSync(cal)
     }
 
     /**
-     * A memo is a short event starting a minute from now with a reminder at
-     * its start, so Google Calendar pops a notification on every phone that
-     * syncs the Family calendar.
+     * Changes just this occurrence. A repeating event gets a one-off
+     * exception so the rest of the series stays as it was.
+     */
+    private fun updateOccurrence(item: Item, values: ContentValues) {
+        if (item.recurring) {
+            values.put(Events.ORIGINAL_INSTANCE_TIME, item.begin)
+            resolver.insert(ContentUris.withAppendedId(Events.CONTENT_EXCEPTION_URI, item.eventId), values)
+        } else {
+            resolver.update(ContentUris.withAppendedId(Events.CONTENT_URI, item.eventId), values, null, null)
+        }
+    }
+
+    /**
+     * A memo is a short event starting a minute from now. Google keeps
+     * reminders per user, so the app on each phone notifies instead
+     * (see notify.MemoJobService).
      */
     fun sendMemo(cal: CalendarInfo, body: String, from: String?, to: String) {
         val start = System.currentTimeMillis() + 60_000L
-        val id = insertEvent(
+        insertEvent(
             cal, "${Item.MEMO} $body", Item.buildDescription(mapOf("from" to from, "for" to to)),
             start, start + 5 * 60_000L, allDay = false,
-        ) ?: return
-        resolver.insert(Reminders.CONTENT_URI, ContentValues().apply {
-            put(Reminders.EVENT_ID, id)
-            put(Reminders.MINUTES, 0)
-            put(Reminders.METHOD, Reminders.METHOD_ALERT)
-        })
-        requestSync(cal)
+        )
     }
 
     private fun insertEvent(

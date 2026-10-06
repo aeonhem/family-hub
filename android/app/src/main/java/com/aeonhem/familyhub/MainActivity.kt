@@ -1,7 +1,9 @@
 package com.aeonhem.familyhub
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -18,31 +20,46 @@ class MainActivity : ComponentActivity() {
 
     private val vm: HubViewModel by viewModels()
 
-    private val perms = arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+    private val calendarPerms = arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+
+    // Memo notifications need asking for on Android 13+. The app still works without them.
+    private val notifyPerms: Array<String> =
+        if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.POST_NOTIFICATIONS) else emptyArray<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val prefs = getSharedPreferences("familyhub", Context.MODE_PRIVATE)
         setContent {
             val launcher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions(),
-            ) { result -> vm.onPermission(result.values.all { it }) }
+            ) { vm.onPermission(granted(calendarPerms)) }
 
             LaunchedEffect(Unit) {
-                if (hasPerms()) vm.onPermission(true) else launcher.launch(perms)
+                if (granted(calendarPerms)) {
+                    vm.onPermission(true)
+                    // Ask once for phones that granted calendar access before memos notified.
+                    if (!granted(notifyPerms) && !prefs.getBoolean("askedNotify", false)) {
+                        prefs.edit().putBoolean("askedNotify", true).apply()
+                        launcher.launch(notifyPerms)
+                    }
+                } else {
+                    prefs.edit().putBoolean("askedNotify", true).apply()
+                    launcher.launch(calendarPerms + notifyPerms)
+                }
             }
 
             HubTheme {
-                FamilyHubApp(vm = vm, onRequestPermission = { launcher.launch(perms) })
+                FamilyHubApp(vm = vm, onRequestPermission = { launcher.launch(calendarPerms + notifyPerms) })
             }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        if (hasPerms()) vm.refresh()
+        if (granted(calendarPerms)) vm.refresh()
     }
 
-    private fun hasPerms() = perms.all {
+    private fun granted(perms: Array<String>) = perms.all {
         ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
     }
 }

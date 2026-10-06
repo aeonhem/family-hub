@@ -12,11 +12,22 @@ key to set up. Events follow [../docs/calendar-conventions.md](../docs/calendar-
 1. On the phone, open https://github.com/aeonhem/family-hub/releases/latest
    (signed in to GitHub) and download `FamilyHub.apk`.
 2. Open it and allow installing from this source when Android asks.
-3. On first launch: allow calendar access, pick your name, and it finds the
-   Family calendar by itself.
+3. On first launch: allow calendar access and notifications, pick your name,
+   and it finds the Family calendar by itself.
 
-Every build is signed with the same committed key and has a higher version
-number, so new versions install over the old one.
+## Memo notifications
+
+Google keeps calendar reminders per person, so the app itself notifies you
+when a memo arrives for you (or for everyone) from someone else. It checks
+whenever the phone's calendar changes, and every 15 minutes as a backup,
+including after a restart. If you said no to notifications, everything else
+still works; turn them on later in Android Settings > Apps > Family Hub.
+The first check after installing only notes the memos already there, so
+older ones don't all pop up at once.
+
+CI publishes a shrunk release build. Every build is signed with the same
+committed key and has a higher version number, so new versions install over
+the old one.
 
 ## Automatic updates with Obtainium
 
@@ -39,7 +50,8 @@ releases and offers each new build with one tap.
 
 ```
 cd android
-./gradlew assembleDebug
+./gradlew assembleDebug        # or assembleRelease, as CI does
+./gradlew testDebugUnitTest    # unit tests for the title/description parsing
 ```
 
 Needs JDK 17 and the Android SDK (Android Studio installs both).
