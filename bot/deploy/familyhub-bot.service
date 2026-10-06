@@ -9,6 +9,12 @@ WorkingDirectory=/opt/family-hub/bot
 ExecStart=/opt/family-hub/bot/.venv/bin/python bot.py
 Restart=always
 RestartSec=10
+# Can only write its own folder (state.json); nothing else on the server.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/family-hub/bot
 
 [Install]
 WantedBy=multi-user.target

@@ -27,8 +27,9 @@ chores and memos appear in the Calendar app they use with no install at all.
 ```
 
 - **Storage and sync**: Google Calendar. Edits on any device show everywhere.
-- **Push to Android**: Google Calendar's own reminders. A memo is an event
-  with a popup reminder at 0 minutes, so it buzzes Julian's and Sally's phones.
+- **Push to Android**: the app posts its own notification when a memo for
+  that phone's person arrives. (Not Google Calendar reminders: Google keeps
+  reminders per person, so one set by the sender only buzzes the sender.)
 - **Push to Erlina**: the bot polls the calendar and DMs her anything new
   addressed to her. Discord DMs are normal iPhone notifications.
 - **The Android app** reads and writes the same calendar through the phone's
@@ -49,5 +50,9 @@ How each thing is stored as an event is in
 ## Trade-offs
 
 - Notes are a stretch for a calendar (they're stored as all-day events).
-- Ticking a chore renames the event; the app and bot hide that detail.
-- The bot runs on a free Oracle Cloud server (Always Free tier).
+- Ticking a chore renames the event; the app and bot hide that detail. For a
+  repeating chore only that day's occurrence changes.
+- Memos are 5-minute events, so they also show in Google Calendar. If anyone
+  gets a second alert from Google Calendar, turn off that calendar's default
+  notifications in Google Calendar settings.
+- The bot runs on a free Google Cloud server (e2-micro, free tier).

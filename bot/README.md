@@ -7,7 +7,8 @@ Family Hub for Erlina's iPhone, through Discord:
 - **Commands**: `/today`, `/dinner`, `/chores`, `/memo`. She can also just
   type "what's for dinner?" or "chores" in the DM.
 - Ticking a chore updates the Family calendar, so it shows as done in the
-  Android app too, and she gets a "Nice! 2 of 3 done" message.
+  Android app too, and she gets a "Nice! 2 of 3 done" message with how many
+  she has ticked this week.
 
 It reads and writes the Family Google Calendar using
 [../docs/calendar-conventions.md](../docs/calendar-conventions.md).
@@ -48,38 +49,40 @@ outside accounts, so the bot signs in as you once and keeps a token.
    `family04174376375408900708@group.calendar.google.com`
    (`FAMILY_CALENDAR_ID`).
 
-### 3. Free cloud server
+### 3. Free cloud server (Google Cloud)
 
-Oracle Cloud's Always Free tier runs this at no cost.
+Google Cloud's free tier includes one small always-on server (e2-micro).
+Use the same "Family Hub" project as step 2.
 
-1. Sign up at https://www.oracle.com/cloud/free/ (it asks for a card to
-   check you're real; Always Free resources aren't charged).
-2. **Create a VM instance**: image **Ubuntu 24.04**, shape
-   **VM.Standard.E2.1.Micro** (Always Free). Download the SSH key it offers.
-3. SSH in, then:
-
-```
-git clone https://<your-github-token>@github.com/aeonhem/family-hub.git
-sudo bash family-hub/bot/deploy/setup.sh
-```
-
-The token is the read-only one you make for Obtainium (see
-../android/README.md).
-
-4. Copy `token.json` to `/opt/family-hub/bot/`, then create
-   `/opt/family-hub/bot/.env` from `.env.example` with the values above, and:
+1. https://console.cloud.google.com/billing: link a billing account to the
+   project (Google wants a card on file even for free-tier use).
+2. **Compute Engine > VM instances > Create instance** (enable the Compute
+   Engine API if asked):
+   - Region **us-central1**, **us-west1** or **us-east1** (only these are free)
+   - Machine type **e2-micro**
+   - Boot disk: **Ubuntu 24.04 LTS**, **Standard persistent disk**, 10 GB
+   - No firewall rules needed: the bot only makes outgoing connections.
+3. Check **Billing > Reports** after a few days. The VM itself is free, but
+   Google may charge a little for the public IP address.
+4. Copy this repo's `bot` folder, `token.json` and a filled-in `.env` (from
+   `.env.example`) to the server, then on the server:
 
 ```
+sudo bash bot/deploy/setup.sh
+sudo cp token.json .env /opt/family-hub/bot/
 sudo chown familyhub /opt/family-hub/bot/.env /opt/family-hub/bot/token.json
+sudo chmod 600 /opt/family-hub/bot/.env /opt/family-hub/bot/token.json
 sudo systemctl restart familyhub-bot
 sudo journalctl -u familyhub-bot -f
 ```
 
+If Google sign-in ever stops working, the bot DMs the parents listed in
+`PARENT_DISCORD_IDS`. Re-run `authorize.py` and copy the new `token.json` over.
+
 ## Updating
 
-```
-cd ~/family-hub && git pull && sudo bash bot/deploy/setup.sh
-```
+Copy the new `bot` folder to the server and run `sudo bash bot/deploy/setup.sh`
+again (or `git pull` first if you cloned the repo there).
 
 `setup.sh` keeps `.env`, `token.json` and the bot's state across updates.
 

@@ -24,6 +24,9 @@ fi
 python3 -m venv /opt/family-hub/bot/.venv
 /opt/family-hub/bot/.venv/bin/pip install -q -r /opt/family-hub/bot/requirements.txt
 chown -R familyhub:familyhub /opt/family-hub
+for f in .env token.json; do
+  [ -f "/opt/family-hub/bot/$f" ] && chmod 600 "/opt/family-hub/bot/$f"
+done
 
 cp /opt/family-hub/bot/deploy/familyhub-bot.service /etc/systemd/system/
 systemctl daemon-reload
