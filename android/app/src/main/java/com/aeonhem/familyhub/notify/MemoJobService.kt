@@ -47,7 +47,8 @@ object MemoJobs {
         val job = JobInfo.Builder(CONTENT_JOB, ComponentName(ctx, MemoJobService::class.java))
             .addTriggerContentUri(
                 JobInfo.TriggerContentUri(
-                    CalendarContract.Events.CONTENT_URI,
+                    // The provider notifies its root URI on every change, synced ones included.
+                    CalendarContract.CONTENT_URI,
                     JobInfo.TriggerContentUri.FLAG_NOTIFY_FOR_DESCENDANTS,
                 ),
             )
