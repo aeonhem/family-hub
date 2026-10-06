@@ -12,8 +12,11 @@ android {
         applicationId = "com.aeonhem.familyhub"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes its run number so every published build is newer than the
+        // last one, which is what update checkers like Obtainium compare.
+        val build = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+        versionCode = build
+        versionName = "0.1.$build"
     }
 
     signingConfigs {

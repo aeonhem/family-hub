@@ -32,14 +32,14 @@ jobs:
         with:
           name: FamilyHub-apk
           path: android/FamilyHub.apk
-      # On main, keep a "latest" release with the APK attached so it can be
-      # downloaded straight from a phone.
-      - name: Publish latest release
+      # On main, publish each build as its own release (v0.1.<run>) so the
+      # newest one is always at /releases/latest and Obtainium can spot it.
+      - name: Publish release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: Family Hub (latest)
-          prerelease: true
+          tag_name: v0.1.${{ github.run_number }}
+          name: Family Hub 0.1.${{ github.run_number }}
+          make_latest: true
           files: android/FamilyHub.apk
           body: Sideload FamilyHub.apk on Android. Built from ${{ github.sha }}.
