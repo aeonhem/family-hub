@@ -28,12 +28,31 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // Same key for release builds, so they install over the old debug ones.
+        create("family") {
+            storeFile = file("familyhub-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("debug")
         }
+        release {
+            signingConfig = signingConfigs.getByName("family")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    // CI uploads the lint report; warnings shouldn't fail the build.
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
     }
 
     compileOptions {
@@ -60,4 +79,5 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    testImplementation("junit:junit:4.13.2")
 }

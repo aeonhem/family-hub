@@ -11,6 +11,9 @@ enum class Kind { EVENT, DINNER, CHORE, MEMO, NOTE }
  *
  * [title] has the prefix stripped. [meta] holds the `key: value` lines from
  * the description (`for`, `from`, `cook`, `done-by`), keys lower-cased.
+ * [begin] and [end] are this occurrence's times in millis; [endDate] is the
+ * last day it covers (same as [date] unless it runs over several days).
+ * [recurring] means the event repeats, so edits must touch only this one.
  */
 data class Item(
     val eventId: Long,
@@ -22,7 +25,16 @@ data class Item(
     val done: Boolean,
     val meta: Map<String, String>,
     val note: String,
+    val begin: Long = 0L,
+    val end: Long = 0L,
+    val endDate: LocalDate = date,
+    val recurring: Boolean = false,
 ) {
+    /** Identifies one occurrence; a repeating event shares its eventId. */
+    val key: String get() = "$eventId@$begin"
+
+    fun covers(day: LocalDate): Boolean = day >= date && day <= endDate
+
     val forWho: String? get() = meta["for"]
     val from: String? get() = meta["from"]
     val cook: String? get() = meta["cook"]
