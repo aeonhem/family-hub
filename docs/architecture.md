@@ -19,7 +19,7 @@ chores and memos appear in the Calendar app they use with no install at all.
           │  events, 🍽 dinners, ☐/✅ chores, │
           │  📣 memos, 📝 notes               │
           └──────┬──────────────────┬────────┘
-                 │ Calendar API     │ Calendar API (service account)
+                 │ phone calendar   │ Calendar API (service account)
        ┌─────────┴───────┐   ┌──────┴─────────────┐
        │ Android app     │   │ Discord bot        │
        │ (Julian, Sally) │   │ (Erlina, iPhone)   │
@@ -31,9 +31,9 @@ chores and memos appear in the Calendar app they use with no install at all.
   with a popup reminder at 0 minutes, so it buzzes Julian's and Sally's phones.
 - **Push to Erlina**: the bot polls the calendar and DMs her anything new
   addressed to her. Discord DMs are normal iPhone notifications.
-- **The Android app** reads and writes the same calendar and shows it as
-  Today / Dinner / Chores / Memos, with proper tick boxes. Signs in with the
-  phone's Google account.
+- **The Android app** reads and writes the same calendar through the phone's
+  own calendar storage (what Google Calendar syncs), so no sign-in or API key.
+  It shows Today / Dinner / Chores / Memos, with proper tick boxes.
 - **Distribution**: GitHub Actions builds the APK; download and sideload it.
 
 How each thing is stored as an event is in
