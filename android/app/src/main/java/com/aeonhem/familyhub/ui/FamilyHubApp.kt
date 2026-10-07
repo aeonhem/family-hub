@@ -66,7 +66,8 @@ fun FamilyHubApp(vm: HubViewModel, onRequestPermission: () -> Unit) {
         s.calendar == null -> SetupScreen(
             "Pick the Family calendar",
             if (s.calendars.isEmpty()) "No calendars found. Check Google Calendar is syncing on this phone."
-            else "Choose the calendar the whole family shares.",
+            else "No Family calendar on this phone yet. Check this Google account is in the Google family " +
+                "(Google app > Manage your Google Account > People & sharing > Family group), then reopen the app.",
         ) {
             s.calendars.filter { it.canWrite }.forEach { cal -> PickRow("${cal.name}\n${cal.accountName}") { vm.chooseCalendar(cal) } }
         }

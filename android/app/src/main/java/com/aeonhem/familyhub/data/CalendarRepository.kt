@@ -22,7 +22,17 @@ data class CalendarInfo(
     val accountName: String,
     val accountType: String,
     val canWrite: Boolean,
-)
+    val ownerAccount: String = "",
+    val synced: Boolean = true,
+) {
+    /** Google's auto-made family calendar: family<digits>@group.calendar.google.com. */
+    val isFamily: Boolean
+        get() = FAMILY_ID.matches(ownerAccount) || name.equals("Family", ignoreCase = true)
+
+    private companion object {
+        val FAMILY_ID = Regex("^family\\d+@group\\.calendar\\.google\\.com$", RegexOption.IGNORE_CASE)
+    }
+}
 
 /**
  * Reads and writes the Family calendar through the phone's own calendar
@@ -40,9 +50,14 @@ class CalendarRepository(private val resolver: ContentResolver) {
             Calendars.ACCOUNT_NAME,
             Calendars.ACCOUNT_TYPE,
             Calendars.CALENDAR_ACCESS_LEVEL,
+            Calendars.OWNER_ACCOUNT,
+            Calendars.VISIBLE,
+            Calendars.SYNC_EVENTS,
         )
         val out = mutableListOf<CalendarInfo>()
-        resolver.query(Calendars.CONTENT_URI, projection, "${Calendars.VISIBLE} = 1", null, null)?.use { c ->
+        // No VISIBLE filter: a Family calendar switched off in Google Calendar
+        // still has to be found so it can be switched back on.
+        resolver.query(Calendars.CONTENT_URI, projection, null, null, null)?.use { c ->
             while (c.moveToNext()) {
                 out += CalendarInfo(
                     id = c.getLong(0),
@@ -50,10 +65,30 @@ class CalendarRepository(private val resolver: ContentResolver) {
                     accountName = c.getString(2) ?: "",
                     accountType = c.getString(3) ?: "",
                     canWrite = c.getInt(4) >= Calendars.CAL_ACCESS_CONTRIBUTOR,
+                    ownerAccount = c.getString(5) ?: "",
+                    synced = c.getInt(6) == 1 && c.getInt(7) == 1,
                 )
             }
         }
         return out
+    }
+
+    /**
+     * Turn on sync and visibility for [cal] if Google Calendar has it off on
+     * this phone, then ask for a sync. Without this the phone never downloads
+     * the Family calendar's events and the app shows an empty week.
+     */
+    fun ensureSynced(cal: CalendarInfo) {
+        if (!cal.synced) {
+            val values = ContentValues().apply {
+                put(Calendars.SYNC_EVENTS, 1)
+                put(Calendars.VISIBLE, 1)
+            }
+            runCatching {
+                resolver.update(ContentUris.withAppendedId(Calendars.CONTENT_URI, cal.id), values, null, null)
+            }
+        }
+        requestSync(cal)
     }
 
     /** All event occurrences on [calendarId] that overlap [from]..[to] (local dates). */
