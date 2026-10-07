@@ -36,6 +36,11 @@ chores and memos appear in the Calendar app they use with no install at all.
   own calendar storage (what Google Calendar syncs), so no sign-in or API key.
   It shows Today / Dinner / Chores / Memos, with proper tick boxes.
 - **Distribution**: GitHub Actions builds the APK; download and sideload it.
+- **Web app** (web/): an alternative for Erlina to the bot, with the Android
+  app's tabs, saved to her iPhone home screen. It runs next to the bot on the
+  same server with the same Google sign-in, behind a family passcode, and
+  sends memo alerts with Web Push. HTTPS comes from Caddy on a free
+  sslip.io address, so no domain to pay for.
 
 How each thing is stored as an event is in
 [calendar-conventions.md](calendar-conventions.md).

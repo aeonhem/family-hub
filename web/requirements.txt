@@ -1,0 +1,6 @@
+aiohttp>=3.9,<4
+pywebpush>=2.0
+cryptography>=42
+google-api-python-client>=2.140
+google-auth>=2.30
+python-dotenv>=1.0

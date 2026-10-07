@@ -1,0 +1,23 @@
+[Unit]
+Description=Family Hub web app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=familyhub
+WorkingDirectory=/opt/family-hub/web
+EnvironmentFile=/etc/familyhub-web.env
+ExecStart=/opt/family-hub/web/.venv/bin/python server.py
+Restart=always
+RestartSec=10
+# Subscriptions and keys live in /var/lib/familyhub-web, so updates (which
+# replace /opt/family-hub) keep them.
+StateDirectory=familyhub-web
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

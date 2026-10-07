@@ -37,3 +37,8 @@ if [ -f /opt/family-hub/bot/.env ] && [ -f /opt/family-hub/bot/token.json ]; the
 else
   echo "Installed. Add .env and token.json to /opt/family-hub/bot, then: sudo systemctl restart familyhub-bot"
 fi
+
+# Erlina's web app shares this folder; reinstall it if it's been set up.
+if [ -f /etc/familyhub-web.env ]; then
+  bash /opt/family-hub/web/deploy/setup.sh
+fi
