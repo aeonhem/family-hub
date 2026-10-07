@@ -65,11 +65,16 @@ fun FamilyHubApp(vm: HubViewModel, onRequestPermission: () -> Unit) {
 
         s.calendar == null -> SetupScreen(
             "Pick the Family calendar",
-            if (s.calendars.isEmpty()) "No calendars found. Check Google Calendar is syncing on this phone."
-            else "No Family calendar on this phone yet. Check this Google account is in the Google family " +
-                "(Google app > Manage your Google Account > People & sharing > Family group), then reopen the app.",
+            when {
+                s.calendars.isEmpty() -> "No calendars found. Check Google Calendar is syncing on this phone."
+                s.calendars.any { it.isGoogleFamily } -> "Choose the calendar the whole family shares. Google's Family calendar is at the top."
+                else -> "No Google Family calendar on this phone yet. Check this Google account is in the Google family " +
+                    "(Google app > Manage your Google Account > People & sharing > Family group), then reopen the app."
+            },
         ) {
-            s.calendars.filter { it.canWrite }.forEach { cal -> PickRow("${cal.name}\n${cal.accountName}") { vm.chooseCalendar(cal) } }
+            s.calendars.filter { it.canWrite || it.isGoogleFamily }.sortedByDescending { it.familyRank }.forEach { cal ->
+                PickRow("${cal.name}\n${cal.accountName.ifBlank { cal.ownerAccount }}") { vm.chooseCalendar(cal) }
+            }
         }
 
         else -> MainScaffold(vm, s)
@@ -118,6 +123,14 @@ private fun MainScaffold(vm: HubViewModel, s: HubState) {
                         color = Hub.Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                     )
                     Text(tab.heading, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Hub.Ink)
+                    s.calendar?.let { cal ->
+                        // Shows which calendar this phone reads, and is the way to change it.
+                        Text(
+                            "${cal.name} · ${cal.accountName} · change",
+                            modifier = Modifier.clickable { vm.changeCalendar() }.padding(top = 2.dp),
+                            color = Hub.Muted, fontSize = 12.sp,
+                        )
+                    }
                 }
             }
             when (tab) {

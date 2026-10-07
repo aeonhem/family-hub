@@ -71,12 +71,14 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
             val cals = withContext(Dispatchers.IO) { repo.calendars() }
             val savedId = prefs.getLong("calendarId", -1L)
             val saved = cals.firstOrNull { it.id == savedId }
-            // The Family calendar always wins, so a phone that was set to
-            // someone's own calendar (picked by hand before Family had synced)
-            // moves onto the shared one by itself.
-            val chosen = saved?.takeIf { it.isFamily }
-                ?: cals.firstOrNull { it.canWrite && it.isFamily }
-                ?: saved
+            // Google's Family calendar always wins, so a phone set to someone's
+            // own calendar, or to another app's "Family", moves onto the shared
+            // one by itself. A pick at least as good as the best stays.
+            val best = cals.filter { it.familyRank > 0 && (it.canWrite || it.isGoogleFamily) }.maxByOrNull { it.familyRank }
+            val chosen = when {
+                saved != null && saved.familyRank >= (best?.familyRank ?: 0) -> saved
+                else -> best ?: saved
+            }
             _state.update { it.copy(calendars = cals.filter { c -> c.synced || c.isFamily }, calendar = chosen) }
             chosen?.let {
                 prefs.edit().putLong("calendarId", it.id).apply()
@@ -98,6 +100,11 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { repo.ensureSynced(cal) }
         MemoJobs.schedule(getApplication<Application>())
         refresh()
+    }
+
+    /** Back to the calendar picker, e.g. when the wrong calendar is showing. */
+    fun changeCalendar() {
+        _state.update { it.copy(calendar = null) }
     }
 
     fun refresh() {
