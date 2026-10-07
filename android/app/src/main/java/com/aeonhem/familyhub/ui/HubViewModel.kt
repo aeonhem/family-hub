@@ -70,11 +70,17 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val cals = withContext(Dispatchers.IO) { repo.calendars() }
             val savedId = prefs.getLong("calendarId", -1L)
-            val chosen = cals.firstOrNull { it.id == savedId }
-                ?: cals.filter { it.canWrite && it.name.equals("Family", ignoreCase = true) }.singleOrNull()
-            _state.update { it.copy(calendars = cals, calendar = chosen) }
+            val saved = cals.firstOrNull { it.id == savedId }
+            // The Family calendar always wins, so a phone that was set to
+            // someone's own calendar (picked by hand before Family had synced)
+            // moves onto the shared one by itself.
+            val chosen = saved?.takeIf { it.isFamily }
+                ?: cals.firstOrNull { it.canWrite && it.isFamily }
+                ?: saved
+            _state.update { it.copy(calendars = cals.filter { c -> c.synced || c.isFamily }, calendar = chosen) }
             chosen?.let {
                 prefs.edit().putLong("calendarId", it.id).apply()
+                withContext(Dispatchers.IO) { repo.ensureSynced(it) }
                 MemoJobs.schedule(getApplication<Application>())
             }
             refresh()
@@ -89,6 +95,7 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
     fun chooseCalendar(cal: CalendarInfo) {
         prefs.edit().putLong("calendarId", cal.id).apply()
         _state.update { it.copy(calendar = cal) }
+        viewModelScope.launch(Dispatchers.IO) { repo.ensureSynced(cal) }
         MemoJobs.schedule(getApplication<Application>())
         refresh()
     }
