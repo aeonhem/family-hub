@@ -28,14 +28,9 @@ if [ -n "${1:-}" ] || [ ! -f "$ENV" ]; then
 fi
 HOST="$(sed -n 's/^WEB_HOST=//p' "$ENV")"
 
-# Caddy gets and renews the HTTPS certificate by itself.
-if ! command -v caddy >/dev/null; then
-  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
-  curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update -y
-  apt-get install -y caddy
-fi
+# Caddy gets and renews the HTTPS certificate by itself. Ubuntu's own package
+# is enough (Caddy's apt repo failed its signing-key check on 2026-10-07).
+command -v caddy >/dev/null || apt-get install -y caddy
 cat > /etc/caddy/Caddyfile <<CADDY
 $HOST {
 	encode gzip
