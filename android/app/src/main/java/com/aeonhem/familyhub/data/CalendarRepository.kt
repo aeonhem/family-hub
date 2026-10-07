@@ -26,8 +26,20 @@ data class CalendarInfo(
     val synced: Boolean = true,
 ) {
     /** Google's auto-made family calendar: family<digits>@group.calendar.google.com. */
-    val isFamily: Boolean
-        get() = FAMILY_ID.matches(ownerAccount) || name.equals("Family", ignoreCase = true)
+    val isGoogleFamily: Boolean get() = FAMILY_ID.matches(ownerAccount)
+
+    val isFamily: Boolean get() = isGoogleFamily || name.equals("Family", ignoreCase = true)
+
+    /**
+     * How sure we are this is the shared calendar. Some phones (Samsung's
+     * family group, for one) add their own calendar called "Family", so
+     * Google's real one has to outrank a name match.
+     */
+    val familyRank: Int get() = when {
+        isGoogleFamily -> 2
+        isFamily -> 1
+        else -> 0
+    }
 
     private companion object {
         val FAMILY_ID = Regex("^family\\d+@group\\.calendar\\.google\\.com$", RegexOption.IGNORE_CASE)
