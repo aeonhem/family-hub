@@ -1,0 +1,28 @@
+name: Web app
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", "bot/calendar_store.py", ".github/workflows/web.yml"]
+  pull_request:
+    paths: ["web/**", "bot/calendar_store.py", ".github/workflows/web.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest pyflakes
+      - run: python -m pyflakes server.py tests
+      - run: python -m pytest -q tests
+      - run: node --check static/app.js && node --check static/sw.js
+      - run: bash -n deploy/setup.sh

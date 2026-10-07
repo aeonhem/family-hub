@@ -31,6 +31,7 @@ class Item:
     meta: dict[str, str] = field(default_factory=dict)
     note: str = ""
     end_day: date | None = None  # last day it covers; None means just [day]
+    end: datetime | None = None  # None for all-day events
 
     def covers(self, d: date) -> bool:
         """True when the event is on [d], including the middle of a multi-day event."""
@@ -95,16 +96,18 @@ def parse_event(ev: dict, tz: ZoneInfo) -> Item:
     kind, done, title = parse_title(ev.get("summary", ""))
     meta, note = parse_description(ev.get("description"))
     start, end = ev.get("start", {}), ev.get("end", {})
+    end_dt = None
     if "dateTime" in start:
         dt = _local(start["dateTime"], tz)
         day, start_dt = dt.date(), dt
+        end_dt = _local(end["dateTime"], tz) if "dateTime" in end else dt
         # An event ending exactly at midnight doesn't cover the next day.
-        end_day = (_local(end["dateTime"], tz) - timedelta(microseconds=1)).date() if "dateTime" in end else day
+        end_day = (end_dt - timedelta(microseconds=1)).date() if "dateTime" in end else day
     else:
         day, start_dt = date.fromisoformat(start["date"]), None
         # All-day end dates are exclusive.
         end_day = date.fromisoformat(end["date"]) - timedelta(days=1) if "date" in end else day
-    return Item(ev["id"], kind, title, day, start_dt, done, meta, note, max(end_day, day))
+    return Item(ev["id"], kind, title, day, start_dt, done, meta, note, max(end_day, day), end_dt)
 
 
 def _local(stamp: str, tz: ZoneInfo) -> datetime:
@@ -164,6 +167,36 @@ class FamilyCalendar:
                 "reminders": {"useDefault": False, "overrides": []},
             },
         ).execute()
+
+    def add_chore(self, day: date, title: str, for_who: str | None, from_who: str | None) -> None:
+        """An all-day event on [day], like the Android app's "Add a chore"."""
+        self.service.events().insert(
+            calendarId=self.calendar_id,
+            body={
+                "summary": f"{CHORE_OPEN} {title}",
+                "description": build_description({"for": for_who, "from": from_who}),
+                "start": {"date": day.isoformat()},
+                "end": {"date": (day + timedelta(days=1)).isoformat()},
+            },
+        ).execute()
+
+    def save_dinner(self, existing: Item | None, day: date, at: time, meal: str, cook: str | None) -> None:
+        """Adds dinner on [day], or changes [existing] (just that night, if it repeats).
+        An hour long, the same as the Android app makes them."""
+        start = datetime.combine(day, at, self.tz)
+        meta: dict[str, str | None] = dict(existing.meta) if existing else {}
+        meta["cook"] = cook
+        body = {
+            "summary": f"{DINNER} {meal}",
+            "description": build_description(meta, existing.note if existing else ""),
+            "start": {"dateTime": start.isoformat(), "timeZone": str(self.tz)},
+            "end": {"dateTime": (start + timedelta(hours=1)).isoformat(), "timeZone": str(self.tz)},
+        }
+        events = self.service.events()
+        if existing:
+            events.patch(calendarId=self.calendar_id, eventId=existing.event_id, body=body).execute()
+        else:
+            events.insert(calendarId=self.calendar_id, body=body).execute()
 
     def get(self, event_id: str) -> Item:
         ev = self.service.events().get(calendarId=self.calendar_id, eventId=event_id).execute()
