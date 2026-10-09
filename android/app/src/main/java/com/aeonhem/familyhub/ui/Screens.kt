@@ -76,6 +76,8 @@ fun TodayScreen(s: HubState, vm: HubViewModel) {
     var editing by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (s.me == "Julian" || s.me == "Sally") SchoolEmailsCard()
+
         Column(
             Modifier
                 .fillMaxWidth()
