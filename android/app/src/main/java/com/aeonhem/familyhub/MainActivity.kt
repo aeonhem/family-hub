@@ -16,11 +16,17 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.aeonhem.familyhub.ui.FamilyHubApp
 import com.aeonhem.familyhub.ui.Hub
 import com.aeonhem.familyhub.ui.HubTheme
 import com.aeonhem.familyhub.ui.HubViewModel
 import com.aeonhem.familyhub.ui.Palette
+import com.aeonhem.familyhub.ui.WEATHER_CHECK
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -36,6 +42,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("familyhub", Context.MODE_PRIVATE)
         Hub.palette = Palette.named(prefs.getString("theme", null))
+        // Weather check only while the app is on screen, so it costs nothing in the background.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    vm.weatherIfStale()
+                    delay(WEATHER_CHECK)
+                }
+            }
+        }
         setContent {
             // Status bar and window behind the app follow the picked theme.
             val palette = Hub.palette
@@ -72,7 +87,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (granted(calendarPerms)) vm.refresh()
-        vm.weatherIfStale()
     }
 
     private fun granted(perms: Array<String>) = perms.all {

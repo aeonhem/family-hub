@@ -267,7 +267,7 @@ function weatherCard() {
   const w = S.weather;
   if (!w) {
     return `<section class="card">
-      <div class="card-title">Weather · Molendinar</div>
+      <div class="card-title">Weather</div>
       <div class="empty">${S.weatherFailed ? "Can't get the weather right now. It'll try again soon." : 'Checking the weather…'}</div>
     </section>`;
   }

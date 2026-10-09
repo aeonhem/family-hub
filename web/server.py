@@ -55,6 +55,7 @@ WEATHER_PLACE = os.getenv("WEATHER_PLACE", "Molendinar")
 WEATHER_LAT = float(os.getenv("WEATHER_LAT", "-27.9744"))
 WEATHER_LON = float(os.getenv("WEATHER_LON", "153.359"))
 WEATHER_EVERY = 60 * 60
+WEATHER_RETRY = 10 * 60  # after a failed fetch, keep showing the last weather this long before trying again
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 
 
@@ -108,15 +109,16 @@ def morning_text(items: list[cs.Item], d: date, name: str) -> str:
 
 # WMO weather codes, as Open-Meteo reports them. Same as the Android app's Weather.kt.
 def weather_label(code: int) -> str:
-    table = {0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Cloudy", 45: "Fog", 48: "Fog",
-             61: "Light rain", 66: "Light rain", 63: "Rain", 65: "Heavy rain", 67: "Heavy rain",
-             80: "Showers", 81: "Heavy showers", 82: "Heavy showers", 95: "Thunderstorms",
-             96: "Storms with hail", 99: "Storms with hail"}
-    if code in (51, 53, 55, 56, 57):
-        return "Drizzle"
-    if code in (71, 73, 75, 77, 85, 86):
-        return "Snow"
-    return table.get(code, "Unknown")
+    return WEATHER_LABELS.get(code, "Unknown")
+
+
+WEATHER_LABELS = {
+    0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Cloudy", 45: "Fog", 48: "Fog",
+    **dict.fromkeys((51, 53, 55, 56, 57), "Drizzle"), 61: "Light rain", 66: "Light rain", 63: "Rain",
+    65: "Heavy rain", 67: "Heavy rain", **dict.fromkeys((71, 73, 75, 77, 85, 86), "Snow"),
+    80: "Showers", 81: "Heavy showers", 82: "Heavy showers", 95: "Thunderstorms",
+    96: "Storms with hail", 99: "Storms with hail",
+}
 
 
 def weather_icon(code: int, is_day: bool) -> str:
@@ -267,6 +269,7 @@ class Hub:
         self.subs: list[dict] = store.read("subscriptions.json", [])
         self.state: dict = store.read("state.json", {})
         self.weather_cache: dict | None = None
+        self.weather_retry_at = 0.0
         self.weather_lock = asyncio.Lock()
 
     # --- auth ---
@@ -303,12 +306,14 @@ class Hub:
 
     async def weather(self, request: web.Request) -> web.Response:
         async with self.weather_lock:
-            fresh = self.weather_cache and clock.time() - self.weather_cache["fetched_at"] / 1000 < WEATHER_EVERY
-            if not fresh:
+            now = clock.time()
+            fresh = self.weather_cache and now - self.weather_cache["fetched_at"] / 1000 < WEATHER_EVERY
+            if not fresh and now >= self.weather_retry_at:
                 try:
                     self.weather_cache = await fetch_weather()
                 except Exception:
                     log.exception("weather fetch failed")
+                    self.weather_retry_at = now + WEATHER_RETRY
                     if not self.weather_cache:
                         return web.json_response({"error": "Can't get the weather right now"}, status=502)
         return web.json_response(self.weather_cache)

@@ -20,7 +20,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
@@ -42,7 +41,7 @@ data class HubState(
 )
 
 private const val WEATHER_EVERY = 60 * 60 * 1000L // Julian asked for hourly
-private const val WEATHER_CHECK = 5 * 60 * 1000L
+const val WEATHER_CHECK = 5 * 60 * 1000L
 
 class HubViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -74,17 +73,7 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
 
     private var weatherJob: Job? = null
 
-    init {
-        // Checks every few minutes, but only asks for new weather once it's an hour old.
-        viewModelScope.launch {
-            while (isActive) {
-                weatherIfStale()
-                delay(WEATHER_CHECK)
-            }
-        }
-    }
-
-    /** Also called when the app comes back on screen, in case the phone slept through a check. */
+    /** MainActivity calls this every few minutes while the app is on screen; it only fetches once the weather is an hour old. */
     fun weatherIfStale() {
         val age = System.currentTimeMillis() - (_state.value.weather?.fetchedAt ?: 0L)
         if (age < WEATHER_EVERY || weatherJob?.isActive == true) return
