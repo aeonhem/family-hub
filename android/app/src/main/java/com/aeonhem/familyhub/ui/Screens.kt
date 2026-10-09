@@ -12,8 +12,8 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -47,11 +47,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aeonhem.familyhub.data.Item
 import com.aeonhem.familyhub.data.Kind
+import com.aeonhem.familyhub.data.Weather
+import com.aeonhem.familyhub.data.WeatherSource
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private val timeFmt = DateTimeFormatter.ofPattern("h:mma", Locale.ENGLISH)
 private fun LocalTime.pretty() = format(timeFmt).lowercase()
@@ -76,6 +81,8 @@ fun TodayScreen(s: HubState, vm: HubViewModel) {
     var editing by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        WeatherCard(s.weather, s.weatherFailed)
+
         Column(
             Modifier
                 .fillMaxWidth()
@@ -119,7 +126,7 @@ fun TodayScreen(s: HubState, vm: HubViewModel) {
                         e.covers(today) -> "Today"
                         else -> dayShort(e.date)
                     }
-                    Text(whenText, Modifier.width(60.dp), color = Hub.Teal, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(whenText, Modifier.width(60.dp), color = Hub.TealText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Text(e.title, fontSize = 15.sp)
                 }
             }
@@ -141,6 +148,33 @@ fun TodayScreen(s: HubState, vm: HubViewModel) {
 
     if (editing) DinnerDialog(today, dinner, onDismiss = { editing = false }) { date, time, meal, cook ->
         vm.saveDinner(dinner, date, time, meal, cook); editing = false
+    }
+}
+
+@Composable
+private fun WeatherCard(w: Weather?, failed: Boolean) {
+    HubCard {
+        if (w == null) {
+            Text("Weather · ${WeatherSource.PLACE}", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(
+                if (failed) "Can't get the weather right now. It'll try again soon." else "Checking the weather…",
+                color = Hub.Muted, fontSize = 14.sp,
+            )
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(w.icon, fontSize = 34.sp)
+                Column(Modifier.weight(1f)) {
+                    Text("${w.temp.roundToInt()}°  ${w.label}", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("${w.place} · feels like ${w.feelsLike.roundToInt()}°", color = Hub.Muted, fontSize = 13.sp)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("${w.high.roundToInt()}° / ${w.low.roundToInt()}°", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    w.rainChance?.let { Text("Rain $it%", color = Hub.TealText, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+                }
+            }
+            val at = Instant.ofEpochMilli(w.fetchedAt).atZone(ZoneId.systemDefault()).toLocalTime()
+            Text("Updated ${at.pretty()}", color = Hub.Muted, fontSize = 11.sp)
+        }
     }
 }
 
@@ -249,7 +283,7 @@ fun ChoresScreen(s: HubState, vm: HubViewModel) {
                     val (bg, fg) = when {
                         dayChores.isEmpty() || d > today -> Hub.Track to Hub.Muted
                         dayChores.all { it.done } -> Hub.Orange to Color.White
-                        else -> Hub.OrangeSoft to Color(0xFF8A3E12)
+                        else -> Hub.OrangeSoft to Hub.OrangeInk
                     }
                     Box(
                         Modifier.weight(1f).height(40.dp).background(bg, RoundedCornerShape(10.dp)),
@@ -401,7 +435,7 @@ private fun ChoreRow(c: Item, today: LocalDate, showDay: Boolean = false, onTogg
         Column {
             Text(
                 c.title, fontSize = 15.sp,
-                color = if (c.done) Color(0xFF7A8480) else Hub.Ink,
+                color = if (c.done) Hub.DoneInk else Hub.Ink,
                 textDecoration = if (c.done) TextDecoration.LineThrough else null,
             )
             val dayText = when {
@@ -426,8 +460,8 @@ private fun Pill(label: String, selected: Boolean, onClick: () -> Unit) {
     } else {
         OutlinedButton(
             onClick = onClick, shape = RoundedCornerShape(18.dp),
-            border = BorderStroke(2.dp, Color(0xFFA9C9C6)),
-        ) { Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Hub.Teal) }
+            border = BorderStroke(2.dp, Hub.TealLine),
+        ) { Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Hub.TealText) }
     }
 }
 
@@ -438,5 +472,5 @@ private fun DashedButton(label: String, onClick: () -> Unit) {
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         shape = RoundedCornerShape(14.dp),
         border = BorderStroke(2.dp, Hub.Line),
-    ) { Text(label, color = Hub.Teal, fontSize = 15.sp, fontWeight = FontWeight.Bold) }
+    ) { Text(label, color = Hub.TealText, fontSize = 15.sp, fontWeight = FontWeight.Bold) }
 }

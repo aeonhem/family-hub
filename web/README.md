@@ -8,6 +8,11 @@ bot; both keep running, so she can use either.
   Family Google Calendar per [../docs/calendar-conventions.md](../docs/calendar-conventions.md).
 - **Memo alerts** through Web Push (iPhone with iOS 16.4 or newer, once it's
   on the home screen), plus a 7:00am summary for Erlina.
+- **Weather** for Molendinar on the Today tab, from Open-Meteo (free, no
+  key), fetched by the server at most once an hour. Set `WEATHER_LAT`,
+  `WEATHER_LON` and `WEATHER_PLACE` to move it.
+- **Themes** under the settings cog (Teal, Ocean, Berry, Forest, Night),
+  remembered per phone.
 - A family **passcode** keeps the public address private. Changing it signs
   everyone out.
 - Runs on the bot's free Google Cloud server and uses the bot's Google

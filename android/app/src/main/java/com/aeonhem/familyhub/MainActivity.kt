@@ -3,6 +3,7 @@ package com.aeonhem.familyhub
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -11,10 +12,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import com.aeonhem.familyhub.ui.FamilyHubApp
+import com.aeonhem.familyhub.ui.Hub
 import com.aeonhem.familyhub.ui.HubTheme
 import com.aeonhem.familyhub.ui.HubViewModel
+import com.aeonhem.familyhub.ui.Palette
 
 class MainActivity : ComponentActivity() {
 
@@ -29,7 +35,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("familyhub", Context.MODE_PRIVATE)
+        Hub.palette = Palette.named(prefs.getString("theme", null))
         setContent {
+            // Status bar and window behind the app follow the picked theme.
+            val palette = Hub.palette
+            SideEffect {
+                window.statusBarColor = palette.ground.toArgb()
+                window.setBackgroundDrawable(ColorDrawable(palette.ground.toArgb()))
+                WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !palette.dark
+            }
+
             val launcher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions(),
             ) { vm.onPermission(granted(calendarPerms)) }
@@ -57,6 +72,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (granted(calendarPerms)) vm.refresh()
+        vm.weatherIfStale()
     }
 
     private fun granted(perms: Array<String>) = perms.all {

@@ -58,3 +58,24 @@ def test_store_makes_keys_once(tmp_path):
     path, public = store.vapid()
     assert path.exists() and store.vapid()[1] == public
     assert len(server.base64.urlsafe_b64decode(public + "==")) == 65  # uncompressed P-256 point
+
+
+def test_weather_json():
+    # A real Open-Meteo reply for Molendinar, trimmed. Same sample as the app's WeatherTest.kt.
+    data = {"current": {"time": "2026-10-09T14:45", "temperature_2m": 24.9, "apparent_temperature": 24.1,
+                        "weather_code": 0, "is_day": 1},
+            "daily": {"time": ["2026-10-09"], "temperature_2m_max": [25.5], "temperature_2m_min": [18.1],
+                      "precipitation_probability_max": [59]}}
+    w = server.weather_json(data, 42)
+    assert w == {"place": "Molendinar", "temp": 24.9, "feels": 24.1, "label": "Clear", "icon": "☀️",
+                 "high": 25.5, "low": 18.1, "rain": 59, "fetched_at": 42000}
+    data["daily"]["precipitation_probability_max"] = [None]
+    assert server.weather_json(data, 0)["rain"] is None
+
+
+def test_weather_codes():
+    assert server.weather_label(2) == "Partly cloudy"
+    assert server.weather_label(80) == "Showers"
+    assert server.weather_label(95) == "Thunderstorms"
+    assert server.weather_icon(0, False) == "🌙"
+    assert server.weather_icon(63, True) == "🌧️"

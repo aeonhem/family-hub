@@ -11,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import com.aeonhem.familyhub.data.CalendarInfo
 import com.aeonhem.familyhub.data.CalendarRepository
 import com.aeonhem.familyhub.data.Item
+import com.aeonhem.familyhub.data.Weather
+import com.aeonhem.familyhub.data.WeatherSource
 import com.aeonhem.familyhub.notify.MemoJobs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
@@ -34,14 +37,24 @@ data class HubState(
     val items: List<Item> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null,
+    val weather: Weather? = null,
+    val weatherFailed: Boolean = false,
 )
+
+private const val WEATHER_EVERY = 60 * 60 * 1000L // Julian asked for hourly
+private const val WEATHER_CHECK = 5 * 60 * 1000L
 
 class HubViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = CalendarRepository(app.contentResolver)
     private val prefs = app.getSharedPreferences("familyhub", Context.MODE_PRIVATE)
 
-    private val _state = MutableStateFlow(HubState(me = prefs.getString("me", null)))
+    private val _state = MutableStateFlow(
+        HubState(
+            me = prefs.getString("me", null),
+            weather = prefs.getString("weather", null)?.let { WeatherSource.fromJson(it) },
+        ),
+    )
     val state: StateFlow<HubState> = _state
 
     private var refreshJob: Job? = null
@@ -58,6 +71,34 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     private var observing = false
+
+    private var weatherJob: Job? = null
+
+    init {
+        // Checks every few minutes, but only asks for new weather once it's an hour old.
+        viewModelScope.launch {
+            while (isActive) {
+                weatherIfStale()
+                delay(WEATHER_CHECK)
+            }
+        }
+    }
+
+    /** Also called when the app comes back on screen, in case the phone slept through a check. */
+    fun weatherIfStale() {
+        val age = System.currentTimeMillis() - (_state.value.weather?.fetchedAt ?: 0L)
+        if (age < WEATHER_EVERY || weatherJob?.isActive == true) return
+        weatherJob = viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { WeatherSource.fetch() } }
+            result.getOrNull()?.let { prefs.edit().putString("weather", WeatherSource.toJson(it)).apply() }
+            _state.update { it.copy(weather = result.getOrDefault(it.weather), weatherFailed = result.isFailure) }
+        }
+    }
+
+    fun setTheme(p: Palette) {
+        prefs.edit().putString("theme", p.name).apply()
+        Hub.palette = p
+    }
 
     fun onPermission(granted: Boolean) {
         _state.update { it.copy(hasPermission = granted) }
