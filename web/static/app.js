@@ -6,6 +6,17 @@ const FAMILY = ['Julian', 'Sally', 'Erlina'];
 const DINNER_TIMES = ['17:30', '18:00', '18:30', '19:00'];
 const DEFAULT_DINNER_TIME = '18:00';
 const REFRESH_MS = 60 * 1000;
+const WEATHER_MS = 60 * 60 * 1000; // new weather once it's an hour old
+const TZ = 'Australia/Brisbane';
+
+// Same names and colours as the Android app's Palette (Theme.kt); styles in app.css.
+const THEMES = [
+  { id: 'teal', label: 'Teal' },
+  { id: 'ocean', label: 'Ocean' },
+  { id: 'berry', label: 'Berry' },
+  { id: 'forest', label: 'Forest' },
+  { id: 'night', label: 'Night' },
+];
 
 // Material outlined icons, the same ones the Android app uses.
 const ICON = {
@@ -14,6 +25,7 @@ const ICON = {
   chores: 'M22 5.18 10.59 16.6l-4.24-4.24 1.41-1.41 2.83 2.83 10-10L22 5.18zm-2.21 5.04c.13.57.21 1.17.21 1.78 0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8c1.58 0 3.04.46 4.28 1.25l1.44-1.44A9.9 9.9 0 0 0 12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10c0-1.19-.22-2.33-.6-3.39l-1.61 1.61z',
   memos: 'M18 11v2h4v-2h-4zm-2 6.61c.96.71 2.21 1.65 3.2 2.39.4-.53.8-1.07 1.2-1.6-.99-.74-2.24-1.68-3.2-2.4-.4.54-.8 1.08-1.2 1.61zM20.4 5.6c-.4-.53-.8-1.07-1.2-1.6-.99.74-2.24 1.68-3.2 2.4.4.53.8 1.07 1.2 1.6.96-.72 2.21-1.65 3.2-2.4zM4 9c-1.1 0-2 .9-2 2v2c0 1.1.9 2 2 2h1v4h2v-4h1l5 3V6L8 9H4zm5.03 1.71L11 9.53v4.94l-1.97-1.18-.48-.29H4v-2h4.55l.48-.29zM15.5 12c0-1.33-.58-2.53-1.5-3.35v6.69c.92-.81 1.5-2.01 1.5-3.34z',
   check: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
+  settings: 'M19.43 12.98c.04-.32.07-.64.07-.98 0-.34-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65A.488.488 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1a.566.566 0 0 0-.18-.03c-.17 0-.34.09-.43.25l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98 0 .33.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46a.5.5 0 0 0 .61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.06.02.12.03.18.03.17 0 .34-.09.43-.25l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zm-1.98-1.71c.04.31.05.52.05.73 0 .21-.02.43-.05.73l-.14 1.13.89.7 1.08.84-.7 1.21-1.27-.51-1.04-.42-.9.68c-.43.32-.84.56-1.25.73l-1.06.43-.16 1.13-.2 1.35h-1.4l-.19-1.35-.16-1.13-1.06-.43c-.43-.18-.83-.41-1.23-.71l-.91-.7-1.06.43-1.27.51-.7-1.21 1.08-.84.89-.7-.14-1.13c-.03-.31-.05-.54-.05-.74s.02-.43.05-.73l.14-1.13-.89-.7-1.08-.84.7-1.21 1.27.51 1.04.42.9-.68c.43-.32.84-.56 1.25-.73l1.06-.43.16-1.13.2-1.35h1.39l.19 1.35.16 1.13 1.06.43c.43.18.83.41 1.23.71l.91.7 1.06-.43 1.27-.51.7 1.21-1.07.85-.89.7.14 1.13zM12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z',
 };
 const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[name]}"/></svg>`;
 
@@ -70,8 +82,22 @@ const S = {
   memoTo: 'Everyone',
   loginError: '',
   push: 'unknown', // unsupported | install | ask | on | denied
+  theme: store.get('theme') || 'teal',
+  weather: null,
+  weatherFailed: false,
 };
 if (!TABS.some((t) => t.id === S.tab)) S.tab = 'today';
+if (!THEMES.some((t) => t.id === S.theme)) S.theme = 'teal';
+
+function applyTheme() {
+  const root = document.documentElement;
+  if (S.theme === 'teal') delete root.dataset.theme;
+  else root.dataset.theme = S.theme;
+  // The phone's status bar matches the page background.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = getComputedStyle(root).getPropertyValue('--ground').trim();
+}
+applyTheme();
 
 // ---------- server ----------
 
@@ -99,6 +125,23 @@ async function refresh() {
     .catch((e) => { if (S.token) snack(e.message); })
     .finally(() => { refreshing = null; });
   return refreshing;
+}
+
+// The server fetches it at most once an hour for everyone; this asks again
+// once the copy here is an hour old.
+let weatherLoading = false;
+async function loadWeather() {
+  if (!S.token || !S.me || weatherLoading) return;
+  if (S.weather && Date.now() - S.weather.fetched_at < WEATHER_MS) return;
+  weatherLoading = true;
+  try {
+    S.weather = await api('/api/weather'); S.weatherFailed = false;
+  } catch (_) {
+    S.weatherFailed = true;
+  } finally {
+    weatherLoading = false;
+  }
+  render();
 }
 
 async function write(path, body, okText) {
@@ -161,8 +204,11 @@ function mainScreen() {
   if (S.loaded) body = { today: todayTab, dinner: dinnerTab, chores: choresTab, memos: memosTab }[S.tab]();
   return `<main class="main">
     <header class="header">
-      <div class="date">${S.today ? D.long(S.today) : '&nbsp;'}</div>
-      <h1>${tab.heading}</h1>
+      <div class="titles">
+        <div class="date">${S.today ? D.long(S.today) : '&nbsp;'}</div>
+        <h1>${tab.heading}</h1>
+      </div>
+      <button class="cog" data-action="settings" aria-label="Settings">${svg('settings')}</button>
     </header>
     ${body}
   </main>
@@ -187,6 +233,7 @@ function todayTab() {
   const done = chores.filter((c) => c.done).length;
 
   return `<div class="stack">
+    ${weatherCard()}
     ${pushBanner()}
     <button class="dinner-hero" data-action="dinner" data-day="${today}">
       <span class="label">${svg('dinner')}Dinner tonight${dinner && dinner.time ? ` · ${pretty(dinner.time)}` : ''}</span>
@@ -212,6 +259,31 @@ function todayTab() {
       <span class="meta">Latest memo · ${esc(memoMeta(memo))}</span><span class="text">${esc(memo.title)}</span>
     </div></div>` : ''}
   </div>`;
+}
+
+const clockFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+function weatherCard() {
+  const w = S.weather;
+  if (!w) {
+    return `<section class="card">
+      <div class="card-title">Weather</div>
+      <div class="empty">${S.weatherFailed ? "Can't get the weather right now. It'll try again soon." : 'Checking the weather…'}</div>
+    </section>`;
+  }
+  const deg = (n) => `${Math.round(n)}°`;
+  return `<section class="card weather">
+    <span class="icon" aria-hidden="true">${esc(w.icon)}</span>
+    <div class="now">
+      <span class="temp">${deg(w.temp)}&nbsp; ${esc(w.label)}</span>
+      <span class="small-muted">${esc(w.place)} · feels like ${deg(w.feels)}</span>
+    </div>
+    <div class="range">
+      <span>${deg(w.high)} / ${deg(w.low)}</span>
+      ${w.rain == null ? '' : `<span class="rain">Rain ${Math.round(w.rain)}%</span>`}
+    </div>
+    <div class="updated">Updated ${pretty(clockFmt.format(new Date(w.fetched_at)))}</div>
+  </section>`;
 }
 
 // ---------- Dinner ----------
@@ -326,6 +398,21 @@ function pill(label, selected, action, value = label) {
 
 function dialogHtml() {
   const d = S.dialog;
+  if (d.type === 'settings') {
+    return `<div class="scrim" data-action="close-dialog"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+      <h2 id="dlg-title">Settings</h2>
+      <div class="body">
+        <div class="field-label">Theme</div>
+        <div role="radiogroup" aria-label="Theme">${THEMES.map((t) => `
+          <button class="theme-row" role="radio" aria-checked="${S.theme === t.id}" data-action="theme" data-value="${t.id}">
+            <span class="swatch ${t.id}" aria-hidden="true"><i></i><i></i></span>
+            <span class="name">${t.label}</span>${S.theme === t.id ? svg('check') : ''}
+          </button>`).join('')}
+        </div>
+      </div>
+      <div class="actions"><button class="btn-text" data-action="close-dialog">Done</button></div>
+    </div></div>`;
+  }
   if (d.type === 'dinner') {
     const times = [...new Set([...DINNER_TIMES, d.time])].sort();
     return `<div class="scrim" data-action="close-dialog"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
@@ -370,7 +457,7 @@ const actions = {
     history.replaceState(null, '', '/');
     render(); window.scrollTo(0, 0);
   },
-  me(el) { S.me = el.dataset.name; store.set('me', S.me); render(); refresh(); syncPush(); },
+  me(el) { S.me = el.dataset.name; store.set('me', S.me); render(); refresh(); loadWeather(); syncPush(); },
   'switch-me'() { S.me = null; store.set('me', null); render(); },
 
   chore(el) {
@@ -430,6 +517,9 @@ const actions = {
   },
 
   'push-on'() { enablePush(); },
+
+  settings() { S.dialog = { type: 'settings' }; render(); },
+  theme(el) { S.theme = el.dataset.value; store.set('theme', S.theme); applyTheme(); render(); },
 };
 
 function focusSoon(id) {
@@ -456,7 +546,7 @@ document.addEventListener('input', (ev) => {
 
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && S.dialog) { S.dialog = null; render(); }
-  if (ev.key === 'Enter' && S.dialog && ev.target.tagName === 'INPUT') {
+  if (ev.key === 'Enter' && S.dialog && S.dialog.type !== 'settings' && ev.target.tagName === 'INPUT') {
     const btn = document.querySelector('.dialog .btn');
     if (btn && !btn.disabled) btn.click();
   }
@@ -473,7 +563,7 @@ document.addEventListener('submit', async (ev) => {
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.error || 'Could not sign in');
     S.token = data.token; store.set('token', S.token); S.loginError = '';
-    render(); refresh(); syncPush();
+    render(); refresh(); loadWeather(); syncPush();
   } catch (e) {
     S.loginError = e.message; render();
   }
@@ -566,9 +656,11 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); loadWeather(); } });
 setInterval(() => { if (!document.hidden && !S.dialog) refresh(); }, REFRESH_MS);
+setInterval(() => { if (!document.hidden) loadWeather(); }, 5 * 60 * 1000);
 
 render();
 refresh();
+loadWeather();
 syncPush();

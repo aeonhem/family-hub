@@ -52,6 +52,14 @@ MAX_LOGIN_FAILURES = 8  # per address, per LOCKOUT
 LOCKOUT = 15 * 60
 SCHOOL_NEW_DAYS = 7  # unseen school emails stay on the list this long
 SCHOOL_SEEN_DAYS = 14  # and seen ones stay in the Seen list this long
+# Weather for the house: Molendinar QLD, from Julian's map link. Open-Meteo is
+# free and needs no key. Fetched at most once an hour, shared by every phone.
+WEATHER_PLACE = os.getenv("WEATHER_PLACE", "Molendinar")
+WEATHER_LAT = float(os.getenv("WEATHER_LAT", "-27.9744"))
+WEATHER_LON = float(os.getenv("WEATHER_LON", "153.359"))
+WEATHER_EVERY = 60 * 60
+WEATHER_RETRY = 10 * 60  # after a failed fetch, keep showing the last weather this long before trying again
+WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 
 
 # ---------- pure helpers (tested) ----------
@@ -124,6 +132,48 @@ def morning_text(items: list[cs.Item], d: date, name: str) -> str:
     if events:
         parts.append(f"{len(events)} event{'s' if len(events) != 1 else ''}")
     return " · ".join(parts)
+
+
+# WMO weather codes, as Open-Meteo reports them. Same as the Android app's Weather.kt.
+def weather_label(code: int) -> str:
+    return WEATHER_LABELS.get(code, "Unknown")
+
+
+WEATHER_LABELS = {
+    0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Cloudy", 45: "Fog", 48: "Fog",
+    **dict.fromkeys((51, 53, 55, 56, 57), "Drizzle"), 61: "Light rain", 66: "Light rain", 63: "Rain",
+    65: "Heavy rain", 67: "Heavy rain", **dict.fromkeys((71, 73, 75, 77, 85, 86), "Snow"),
+    80: "Showers", 81: "Heavy showers", 82: "Heavy showers", 95: "Thunderstorms",
+    96: "Storms with hail", 99: "Storms with hail",
+}
+
+
+def weather_icon(code: int, is_day: bool) -> str:
+    if code == 0:
+        return "☀️" if is_day else "🌙"
+    if code == 1:
+        return "🌤️" if is_day else "🌙"
+    groups = [((2,), "⛅"), ((3,), "☁️"), ((45, 48), "🌫️"), ((51, 53, 55, 56, 57, 80, 81, 82), "🌦️"),
+              ((61, 63, 65, 66, 67), "🌧️"), ((71, 73, 75, 77, 85, 86), "❄️"), ((95, 96, 99), "⛈️")]
+    return next((icon for codes, icon in groups if code in codes), "🌡️")
+
+
+def weather_json(data: dict, fetched_at: float) -> dict:
+    """Open-Meteo's reply, cut down to what the Today card shows."""
+    cur, daily = data["current"], data["daily"]
+    code, is_day = int(cur["weather_code"]), cur.get("is_day", 1) == 1
+    rain = (daily.get("precipitation_probability_max") or [None])[0]
+    return {
+        "place": WEATHER_PLACE,
+        "temp": cur["temperature_2m"],
+        "feels": cur.get("apparent_temperature", cur["temperature_2m"]),
+        "label": weather_label(code),
+        "icon": weather_icon(code, is_day),
+        "high": daily["temperature_2m_max"][0],
+        "low": daily["temperature_2m_min"][0],
+        "rain": rain,
+        "fetched_at": int(fetched_at * 1000),
+    }
 
 
 def name_or_none(value) -> str | None:
@@ -226,6 +276,21 @@ def _send_push(sub: dict, payload: dict, key_file: Path, contact: str) -> int | 
     return None
 
 
+async def fetch_weather() -> dict:
+    from aiohttp import ClientSession, ClientTimeout
+
+    params = {
+        "latitude": WEATHER_LAT, "longitude": WEATHER_LON,
+        "current": "temperature_2m,apparent_temperature,weather_code,is_day",
+        "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+        "timezone": str(TZ), "forecast_days": 1,
+    }
+    async with ClientSession(timeout=ClientTimeout(total=10)) as session:
+        async with session.get(WEATHER_URL, params=params) as resp:
+            resp.raise_for_status()
+            return weather_json(await resp.json(), clock.time())
+
+
 # ---------- the app ----------
 
 def today() -> date:
@@ -249,6 +314,9 @@ class Hub:
         self.failures: dict[str, list[float]] = {}
         self.subs: list[dict] = store.read("subscriptions.json", [])
         self.state: dict = store.read("state.json", {})
+        self.weather_cache: dict | None = None
+        self.weather_retry_at = 0.0
+        self.weather_lock = asyncio.Lock()
 
     # --- auth ---
 
@@ -316,6 +384,20 @@ class Hub:
         week_start = d - timedelta(days=d.weekday())
         items = await gcal(self.cal.items, week_start - timedelta(days=14), d + timedelta(days=14))
         return web.json_response({"today": d.isoformat(), "items": [item_json(i) for i in items]})
+
+    async def weather(self, request: web.Request) -> web.Response:
+        async with self.weather_lock:
+            now = clock.time()
+            fresh = self.weather_cache and now - self.weather_cache["fetched_at"] / 1000 < WEATHER_EVERY
+            if not fresh and now >= self.weather_retry_at:
+                try:
+                    self.weather_cache = await fetch_weather()
+                except Exception:
+                    log.exception("weather fetch failed")
+                    self.weather_retry_at = now + WEATHER_RETRY
+                    if not self.weather_cache:
+                        return web.json_response({"error": "Can't get the weather right now"}, status=502)
+        return web.json_response(self.weather_cache)
 
     # --- writing ---
 
@@ -466,6 +548,7 @@ def make_app(hub: Hub) -> web.Application:
     app = web.Application(middlewares=[errors, hub.auth], client_max_size=64 * 1024)
     app.router.add_post("/api/login", hub.login)
     app.router.add_get("/api/items", hub.items)
+    app.router.add_get("/api/weather", hub.weather)
     app.router.add_post("/api/chores", hub.add_chore)
     app.router.add_post("/api/chores/{id}/done", hub.toggle_chore)
     app.router.add_post("/api/dinner", hub.save_dinner)

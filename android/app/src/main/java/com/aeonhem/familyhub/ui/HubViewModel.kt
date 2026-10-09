@@ -11,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import com.aeonhem.familyhub.data.CalendarInfo
 import com.aeonhem.familyhub.data.CalendarRepository
 import com.aeonhem.familyhub.data.Item
+import com.aeonhem.familyhub.data.Weather
+import com.aeonhem.familyhub.data.WeatherSource
 import com.aeonhem.familyhub.notify.MemoJobs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,14 +36,24 @@ data class HubState(
     val items: List<Item> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null,
+    val weather: Weather? = null,
+    val weatherFailed: Boolean = false,
 )
+
+private const val WEATHER_EVERY = 60 * 60 * 1000L // Julian asked for hourly
+const val WEATHER_CHECK = 5 * 60 * 1000L
 
 class HubViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = CalendarRepository(app.contentResolver)
     private val prefs = app.getSharedPreferences("familyhub", Context.MODE_PRIVATE)
 
-    private val _state = MutableStateFlow(HubState(me = prefs.getString("me", null)))
+    private val _state = MutableStateFlow(
+        HubState(
+            me = prefs.getString("me", null),
+            weather = prefs.getString("weather", null)?.let { WeatherSource.fromJson(it) },
+        ),
+    )
     val state: StateFlow<HubState> = _state
 
     private var refreshJob: Job? = null
@@ -58,6 +70,24 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     private var observing = false
+
+    private var weatherJob: Job? = null
+
+    /** MainActivity calls this every few minutes while the app is on screen; it only fetches once the weather is an hour old. */
+    fun weatherIfStale() {
+        val age = System.currentTimeMillis() - (_state.value.weather?.fetchedAt ?: 0L)
+        if (age < WEATHER_EVERY || weatherJob?.isActive == true) return
+        weatherJob = viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { WeatherSource.fetch() } }
+            result.getOrNull()?.let { prefs.edit().putString("weather", WeatherSource.toJson(it)).apply() }
+            _state.update { it.copy(weather = result.getOrDefault(it.weather), weatherFailed = result.isFailure) }
+        }
+    }
+
+    fun setTheme(p: Palette) {
+        prefs.edit().putString("theme", p.name).apply()
+        Hub.palette = p
+    }
 
     fun onPermission(granted: Boolean) {
         _state.update { it.copy(hasPermission = granted) }

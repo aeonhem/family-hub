@@ -3,6 +3,7 @@
   --teal: #1F6F6B;
   --teal-soft: #CFE6E3;
   --teal-line: #A9C9C6;
+  --teal-text: var(--teal); /* the main colour as text on cards; lighter on Night */
   --orange: #D9692A;
   --orange-soft: #FBE3D3;
   --orange-ink: #8A3E12;
@@ -19,6 +20,39 @@
   --nav-h: 80px;
   color-scheme: light;
 }
+
+/* Themes, picked under the settings cog. Same colours as the Android app's
+   Palette in Theme.kt; "teal" (above) is the approved mockup. */
+:root[data-theme="ocean"] {
+  --teal: #1F5A86; --teal-soft: #D3E3F0; --teal-line: #A8C2D8;
+  --orange: #E0703A; --orange-soft: #FCE4D6; --orange-ink: #8A3E12;
+  --ground: #F2F5F8; --card: #FFFFFF; --ink: #1A2330; --muted: #56616E;
+  --line: #A7B2BE; --track: #E3E8EE; --memo-bg: #FFF4EA; --memo-ink: #B4531C; --done-ink: #7A8490;
+  --dialog: #EDF1F5;
+}
+:root[data-theme="berry"] {
+  --teal: #7A3B72; --teal-soft: #F0DCEC; --teal-line: #CFAAC8;
+  --orange: #D2553F; --orange-soft: #FADDD6; --orange-ink: #86301F;
+  --ground: #F7F3F5; --card: #FFFFFF; --ink: #261C24; --muted: #665A63;
+  --line: #B8AAB4; --track: #EDE5EA; --memo-bg: #FDF0F0; --memo-ink: #A8402E; --done-ink: #85798A;
+  --dialog: #F3EDF1;
+}
+:root[data-theme="forest"] {
+  --teal: #2E6337; --teal-soft: #D5E8D3; --teal-line: #AAC8A9;
+  --orange: #C07F12; --orange-soft: #F6E6C4; --orange-ink: #6E4A08;
+  --ground: #F3F5EF; --card: #FFFFFF; --ink: #1C231D; --muted: #5A645A;
+  --line: #AAB3A8; --track: #E5E9E1; --memo-bg: #FBF3E2; --memo-ink: #8F5E0A; --done-ink: #7D867B;
+  --dialog: #EEF2EA;
+}
+:root[data-theme="night"] {
+  --teal: #2B7F79; --teal-soft: #CDEAE6; --teal-line: #3F6E6A;
+  --orange: #E07A3F; --orange-soft: #4A2B1A; --orange-ink: #F6C7A8;
+  --ground: #121816; --card: #1D2522; --ink: #E5ECE9; --muted: #9BA7A3;
+  --line: #4B5854; --track: #2C3733; --memo-bg: #33261C; --memo-ink: #F0A574; --done-ink: #6F7B77;
+  --dialog: #232C29; --teal-text: #6CC4BC;
+  color-scheme: dark;
+}
+:root[data-theme="night"] .btn:disabled { background: rgba(229, 236, 233, 0.12); color: rgba(229, 236, 233, 0.38); }
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -43,7 +77,16 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
   padding: 0 18px calc(var(--nav-h) + 24px + env(safe-area-inset-bottom));
   padding-top: env(safe-area-inset-top);
 }
-.header { padding: 24px 4px 16px; }
+.header { padding: 24px 4px 16px; display: flex; align-items: flex-start; gap: 8px; }
+.header .titles { flex: 1; min-width: 0; }
+.cog {
+  width: 48px; height: 48px;
+  margin: -4px -8px 0 0;
+  border-radius: 24px;
+  display: grid; place-items: center;
+  color: var(--muted);
+}
+.cog svg { width: 24px; height: 24px; fill: currentColor; }
 .header .date { color: var(--muted); font-size: 13px; font-weight: 500; }
 .header h1 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.2px; }
 .stack { display: flex; flex-direction: column; gap: 14px; }
@@ -76,8 +119,8 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
   display: grid; place-items: center;
   transition: background-color 0.15s;
 }
-.nav button[aria-current="page"] { color: var(--teal); }
-.nav button[aria-current="page"] .pill-ind { background: var(--teal-soft); }
+.nav button[aria-current="page"] { color: var(--teal-text); }
+.nav button[aria-current="page"] .pill-ind { background: var(--teal-soft); color: var(--teal); }
 .nav svg { width: 24px; height: 24px; fill: currentColor; }
 
 /* ---------- Cards ---------- */
@@ -115,7 +158,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .progress > div { height: 100%; background: var(--orange); border-radius: 4px; transition: width 0.25s; }
 
 .upcoming { display: flex; gap: 14px; align-items: center; }
-.upcoming .when { width: 60px; flex: none; color: var(--teal); font-size: 13px; font-weight: 700; }
+.upcoming .when { width: 60px; flex: none; color: var(--teal-text); font-size: 13px; font-weight: 700; }
 
 .memo-banner {
   background: var(--memo-bg);
@@ -128,6 +171,14 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .memo-banner .meta { color: var(--memo-ink); font-size: 12px; font-weight: 700; }
 .memo-banner .body { display: flex; flex-direction: column; gap: 2px; }
 .memo-banner .actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+.weather { flex-direction: row; align-items: center; gap: 14px; flex-wrap: wrap; }
+.weather .icon { font-size: 34px; line-height: 1; }
+.weather .now { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.weather .temp { font-size: 20px; font-weight: 700; }
+.weather .range { display: flex; flex-direction: column; align-items: flex-end; font-size: 14px; font-weight: 700; }
+.weather .rain { color: var(--teal-text); font-size: 13px; font-weight: 500; }
+.weather .updated { flex-basis: 100%; font-size: 11px; color: var(--muted); }
 
 /* ---------- Chores ---------- */
 
@@ -198,7 +249,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
   border-radius: 18px;
   font-size: 13px;
   font-weight: 700;
-  color: var(--teal);
+  color: var(--teal-text);
   border: 2px solid var(--teal-line);
 }
 .pill[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: #fff; }
@@ -215,17 +266,17 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .btn.block { width: 100%; }
 .btn:disabled { background: rgba(28, 35, 33, 0.12); color: rgba(28, 35, 33, 0.38); cursor: default; }
 .btn.round { border-radius: 20px; min-height: 40px; font-size: 14px; }
-.btn-text { color: var(--teal); font-weight: 700; font-size: 14px; padding: 10px 12px; border-radius: 20px; }
+.btn-text { color: var(--teal-text); font-weight: 700; font-size: 14px; padding: 10px 12px; border-radius: 20px; }
 .btn-outline {
   width: 100%;
   min-height: 48px;
   border-radius: 14px;
   border: 2px solid var(--line);
-  color: var(--teal);
+  color: var(--teal-text);
   font-size: 15px;
   font-weight: 700;
 }
-.link { color: var(--teal); font-weight: 700; text-decoration: underline; }
+.link { color: var(--teal-text); font-weight: 700; text-decoration: underline; }
 
 /* ---------- Text fields (Material outlined) ---------- */
 
@@ -257,7 +308,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .field textarea:focus + label, .field textarea:not(:placeholder-shown) + label {
   top: -8px; font-size: 12px;
 }
-.field input:focus + label, .field textarea:focus + label { color: var(--teal); }
+.field input:focus + label, .field textarea:focus + label { color: var(--teal-text); }
 
 .field-label { font-weight: 700; font-size: 13px; color: var(--muted); }
 
@@ -285,6 +336,28 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .dialog h2 { margin: 0; font-size: 24px; font-weight: 400; }
 .dialog .body { display: flex; flex-direction: column; gap: 12px; }
 .dialog .actions { display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
+
+.theme-row {
+  display: flex; align-items: center; gap: 14px;
+  min-height: 48px; width: 100%; text-align: left;
+  font-size: 16px; font-weight: 500;
+}
+.theme-row .name { flex: 1; }
+.theme-row svg { width: 24px; height: 24px; fill: var(--teal-text); }
+.swatch {
+  width: 36px; height: 36px; flex: none;
+  border-radius: 18px; border: 1px solid var(--sw-line);
+  background: var(--sw-ground);
+  display: flex; align-items: center; justify-content: center; gap: 3px;
+}
+.swatch i { width: 11px; height: 11px; border-radius: 6px; }
+.swatch i:first-child { background: var(--sw-main); }
+.swatch i:last-child { background: var(--sw-tick); }
+.swatch.teal { --sw-ground: #F4F5F1; --sw-line: #A9B3AF; --sw-main: #1F6F6B; --sw-tick: #D9692A; }
+.swatch.ocean { --sw-ground: #F2F5F8; --sw-line: #A7B2BE; --sw-main: #1F5A86; --sw-tick: #E0703A; }
+.swatch.berry { --sw-ground: #F7F3F5; --sw-line: #B8AAB4; --sw-main: #7A3B72; --sw-tick: #D2553F; }
+.swatch.forest { --sw-ground: #F3F5EF; --sw-line: #AAB3A8; --sw-main: #2E6337; --sw-tick: #C07F12; }
+.swatch.night { --sw-ground: #121816; --sw-line: #4B5854; --sw-main: #2B7F79; --sw-tick: #E07A3F; }
 
 /* ---------- Setup screens ---------- */
 

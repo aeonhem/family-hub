@@ -80,4 +80,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")
+    // Android's own org.json is a stub in unit tests; this is the real one.
+    testImplementation("org.json:json:20240303")
 }
