@@ -54,3 +54,26 @@ WEB_PASSCODE=test python server.py   # reads ../bot/.env and ../bot/token.json
 ```
 
 Then open http://localhost:8080. Tests: `pip install pytest && pytest tests`.
+
+## School emails for the parents
+
+The Android app's Today screen shows Julian and Sally that week's emails from
+@arcadia.qld.edu.au addresses, with a short summary. Swipe one away to move it
+to Seen; that's saved here, so it's gone on both phones. Erlina never sees
+them: they sit behind a second, parents-only passcode.
+
+The server reads Julian's Gmail with its own read-only sign-in, separate from
+the calendar one. To set it up (once):
+
+1. In Google Cloud console, Family Hub project, turn on the **Gmail API**
+   (APIs & Services > Library > Gmail API > Enable).
+2. On the PC with `client_secret.json`:
+   `python bot/authorize.py client_secret.json --gmail`, sign in as Julian and
+   allow "Read your email". It writes `gmail_token.json`.
+3. Copy it to the server and run
+   `sudo bash web/deploy/setup.sh --gmail-token gmail_token.json`, then delete
+   the copy on the server.
+4. Pick a parents' passcode:
+   `sudo bash web/deploy/setup.sh --parents 'parents passcode'`.
+5. On each parent's phone, open Family Hub and type that passcode into the
+   Arcadia emails card once.

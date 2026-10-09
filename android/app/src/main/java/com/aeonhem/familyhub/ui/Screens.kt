@@ -82,6 +82,7 @@ fun TodayScreen(s: HubState, vm: HubViewModel) {
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         WeatherCard(s.weather, s.weatherFailed)
+        if (s.me == "Julian" || s.me == "Sally") SchoolEmailsCard()
 
         Column(
             Modifier

@@ -60,6 +60,124 @@ def test_store_makes_keys_once(tmp_path):
     assert len(server.base64.urlsafe_b64decode(public + "==")) == 65  # uncompressed P-256 point
 
 
+# ---------- school emails ----------
+
+import base64  # noqa: E402
+from datetime import timedelta  # noqa: E402
+
+import school_mail  # noqa: E402
+
+
+def b64(text):
+    return base64.urlsafe_b64encode(text.encode()).decode().rstrip("=")
+
+
+def gmail_msg(id_, sender, subject, when, plain=None, html=None):
+    parts = []
+    if plain is not None:
+        parts.append({"mimeType": "text/plain", "body": {"data": b64(plain)}})
+    if html is not None:
+        parts.append({"mimeType": "text/html", "body": {"data": b64(html)}})
+    parts.append({"mimeType": "application/pdf", "filename": "note.pdf", "body": {"attachmentId": "a"}})
+    return {
+        "id": id_, "threadId": "t" + id_, "snippet": "snip", "internalDate": str(int(when.timestamp() * 1000)),
+        "payload": {"mimeType": "multipart/mixed", "parts": parts,
+                    "headers": [{"name": "From", "value": sender}, {"name": "Subject", "value": subject}]},
+    }
+
+
+def test_from_school_only_matches_arcadia():
+    assert school_mail.from_school("office@arcadia.qld.edu.au")
+    assert school_mail.from_school("news@mail.arcadia.qld.edu.au")
+    assert not school_mail.from_school("arcadia.qld.edu.au@evil.com")
+    assert not school_mail.from_school("someone@notarcadia.qld.edu.au")
+
+
+def test_parse_message_skips_greeting_and_quotes():
+    when = datetime(2026, 10, 9, 8, 15, tzinfo=TZ)
+    plain = ("Dear Parents and Carers,\n\nYear 11 camp forms are due this Friday. Please return them to the office."
+             "\n\nKind regards,\nMs Lee\n\nOn Mon, 5 Oct 2026 someone wrote:\n> old stuff")
+    e = school_mail.parse_message(gmail_msg("1", "Ms Lee <Lee@Arcadia.qld.edu.au>", "Camp forms", when, plain=plain), TZ)
+    assert e.sender == "Ms Lee" and e.address == "lee@arcadia.qld.edu.au" and e.subject == "Camp forms"
+    assert e.summary.startswith("Year 11 camp forms are due this Friday.")
+    assert "old stuff" not in e.body and e.received == when
+
+
+def test_parse_message_falls_back_to_html():
+    when = datetime(2026, 10, 9, 8, 15, tzinfo=TZ)
+    html = "<html><style>p{}</style><p>Hi all,</p><p>Sports day moved to <b>Tuesday</b> &amp; uniforms needed.</p></html>"
+    e = school_mail.parse_message(gmail_msg("2", "news@arcadia.qld.edu.au", "Sports", when, html=html), TZ)
+    assert e.summary == "Sports day moved to Tuesday & uniforms needed."
+
+
+def test_summarise_cuts_at_a_sentence():
+    text = "First point here. " * 30
+    s = school_mail.summarise(text)
+    assert len(s) <= school_mail.SUMMARY_CHARS and s.endswith(".")
+
+
+def test_school_lists_split_new_and_seen():
+    def email(id_, days_ago):
+        return school_mail.Email(id_, id_, "Office", "o@arcadia.qld.edu.au", "S",
+                                 datetime(2026, 10, 9, 9, 0, tzinfo=TZ) - timedelta(days=days_ago), "sum", "body")
+    emails = [email("a", 0), email("b", 1), email("c", 10), email("d", 20)]
+    new, seen = server.school_lists(emails, {"b": "2026-10-09", "c": "2026-10-01"}, date(2026, 10, 9))
+    assert [e["id"] for e in new] == ["a"]
+    assert [e["id"] for e in seen] == ["b", "c"]
+    assert new[0]["link"].endswith("#all/a") and new[0]["time"] == "09:00"
+
+
+class FakeMailbox:
+    def recent(self, days):
+        return [school_mail.Email("m1", "t1", "Office", "o@arcadia.qld.edu.au", "Camp",
+                                  datetime.now(TZ), "Forms due", "Forms due Friday")]
+
+
+def run_client(hub, check):
+    """Runs [check](client) against the app, without a pytest plugin."""
+    import asyncio
+
+    from aiohttp.test_utils import TestClient, TestServer
+
+    async def go():
+        async with TestClient(TestServer(server.make_app(hub))) as client:
+            await check(client)
+    asyncio.run(go())
+
+
+def test_school_api_needs_the_parents_passcode(tmp_path):
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x", FakeMailbox(), "parents")
+    run_client(hub, lambda client: _school_api(client, tmp_path))
+
+
+async def _school_api(client, tmp_path):
+    family = (await (await client.post("/api/login", json={"passcode": "family"})).json())["token"]
+    assert (await client.get("/api/school", headers={"Authorization": f"Bearer {family}"})).status == 401
+    resp = await client.post("/api/school/login", json={"passcode": "parents"})
+    parents = (await resp.json())["token"]
+    assert parents != family
+    auth = {"Authorization": f"Bearer {parents}"}
+    body = await (await client.get("/api/school", headers=auth)).json()
+    assert [e["id"] for e in body["new"]] == ["m1"] and body["seen"] == []
+    assert (await client.post("/api/school/m1/seen", json={"seen": True}, headers=auth)).status == 200
+    body = await (await client.get("/api/school", headers=auth)).json()
+    assert body["new"] == [] and [e["id"] for e in body["seen"]] == ["m1"]
+    # Shared: the swipe is saved on the server, so the other phone sees it too.
+    assert server.Store(tmp_path).read("state.json", {})["school_seen"] == {"m1": server.today().isoformat()}
+    # The parents' token can't be used for the family calendar endpoints, and vice versa.
+    assert (await client.get("/api/push/key", headers=auth)).status == 401
+
+
+def test_school_off_without_parents_passcode(tmp_path):
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x")
+    run_client(hub, _school_off)
+
+
+async def _school_off(client):
+    assert (await client.post("/api/school/login", json={"passcode": ""})).status == 503
+    assert (await client.get("/api/school", headers={"Authorization": "Bearer "})).status == 401
+
+
 def test_weather_json():
     # A real Open-Meteo reply for Molendinar, trimmed. Same sample as the app's WeatherTest.kt.
     data = {"current": {"time": "2026-10-09T14:45", "temperature_2m": 24.9, "apparent_temperature": 24.1,

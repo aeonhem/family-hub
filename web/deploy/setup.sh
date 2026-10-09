@@ -5,9 +5,30 @@
 # update) just reinstall. To change the passcode, run it again with a new one.
 set -euo pipefail
 
+# School emails for the parents (see web/README.md):
+#   sudo bash web/deploy/setup.sh --gmail-token gmail_token.json
+#   sudo bash web/deploy/setup.sh --parents 'parents passcode'
 ENV=/etc/familyhub-web.env
 APP=/opt/family-hub/web
+STATE=/var/lib/familyhub-web
 [ -d "$APP" ] || { echo "Run bot/deploy/setup.sh first (it copies the repo to /opt/family-hub)."; exit 1; }
+
+case "${1:-}" in
+  --gmail-token)
+    [ -f "${2:-}" ] || { echo "Usage: sudo bash web/deploy/setup.sh --gmail-token gmail_token.json"; exit 1; }
+    install -d -m 700 -o familyhub -g familyhub "$STATE"
+    install -m 600 -o familyhub -g familyhub "$2" "$STATE/gmail_token.json"
+    systemctl restart familyhub-web
+    echo "Gmail signed in. School emails are on."
+    exit 0 ;;
+  --parents)
+    [ -n "${2:-}" ] && [ -f "$ENV" ] || { echo "Usage: sudo bash web/deploy/setup.sh --parents 'parents passcode' (after the first setup)"; exit 1; }
+    sed -i '/^PARENT_PASSCODE=/d' "$ENV"
+    printf 'PARENT_PASSCODE=%s\n' "$2" >> "$ENV"
+    systemctl restart familyhub-web
+    echo "Parents passcode set."
+    exit 0 ;;
+esac
 
 if [ -n "${1:-}" ] || [ ! -f "$ENV" ]; then
   PASSCODE="${1:-}"
@@ -21,8 +42,11 @@ if [ -n "${1:-}" ] || [ ! -f "$ENV" ]; then
       || curl -fsS https://api.ipify.org)"
     HOST="${IP//./-}.sslip.io"
   fi
+  PARENTS=""
+  if [ -f "$ENV" ]; then PARENTS="$(sed -n 's/^PARENT_PASSCODE=//p' "$ENV")"; fi
   umask 027
   printf 'WEB_HOST=%s\nWEB_PASSCODE=%s\n' "$HOST" "$PASSCODE" > "$ENV"
+  [ -z "$PARENTS" ] || printf 'PARENT_PASSCODE=%s\n' "$PARENTS" >> "$ENV"
   chown root:familyhub "$ENV"
   chmod 640 "$ENV"
 fi
