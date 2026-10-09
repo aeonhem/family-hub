@@ -33,6 +33,7 @@ HERE = Path(__file__).resolve().parent
 BOT_DIR = Path(os.getenv("BOT_DIR", HERE.parent / "bot"))
 sys.path.insert(0, str(BOT_DIR))
 import calendar_store as cs  # noqa: E402
+import school_mail  # noqa: E402
 
 load_dotenv(HERE / ".env")  # local runs; on the server systemd passes /etc/familyhub-web.env
 load_dotenv(BOT_DIR / ".env")  # calendar id, timezone and token file, shared with the bot
@@ -49,6 +50,8 @@ STATIC = HERE / "static"
 WATCH_EVERY = 30  # seconds between memo checks
 MAX_LOGIN_FAILURES = 8  # per address, per LOCKOUT
 LOCKOUT = 15 * 60
+SCHOOL_NEW_DAYS = 7  # unseen school emails stay on the list this long
+SCHOOL_SEEN_DAYS = 14  # and seen ones stay in the Seen list this long
 
 
 # ---------- pure helpers (tested) ----------
@@ -79,6 +82,30 @@ def item_json(i: cs.Item) -> dict:
         "cook": i.cook,
         "done_by": i.done_by,
     }
+
+
+def email_json(e: school_mail.Email, seen: bool) -> dict:
+    return {
+        "id": e.id,
+        "from": e.sender,
+        "subject": e.subject,
+        "day": e.received.date().isoformat(),
+        "time": e.received.strftime("%H:%M"),
+        "summary": e.summary,
+        "body": e.body,
+        "seen": seen,
+        "link": f"https://mail.google.com/mail/u/0/#all/{e.thread_id}",
+    }
+
+
+def school_lists(emails: list[school_mail.Email], seen: dict[str, str], d: date) -> tuple[list, list]:
+    """(new, seen) for the parents' list: unseen emails from the last week,
+    and the ones swiped away in the last fortnight. Newest first."""
+    new = [email_json(e, False) for e in emails
+           if e.id not in seen and e.received.date() > d - timedelta(days=SCHOOL_NEW_DAYS)]
+    old = [email_json(e, True) for e in emails
+           if e.id in seen and e.received.date() > d - timedelta(days=SCHOOL_SEEN_DAYS)]
+    return new, old
 
 
 def memo_recipients(memo: cs.Item, subs: list[dict]) -> list[dict]:
@@ -170,6 +197,19 @@ def _calendar() -> cs.FamilyCalendar:
     return cs.FamilyCalendar(service, os.environ["FAMILY_CALENDAR_ID"], TZ)
 
 
+def _mailbox() -> school_mail.Mailbox | None:
+    """Julian's Gmail, read-only, if he has signed it in (gmail_token.json)."""
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+
+    token = Path(os.getenv("GMAIL_TOKEN_FILE", STATE_DIR / "gmail_token.json"))
+    if not token.exists():
+        log.info("no %s, so school emails are off", token)
+        return None
+    creds = Credentials.from_authorized_user_file(str(token), school_mail.SCOPES)
+    return school_mail.Mailbox(build("gmail", "v1", credentials=creds, cache_discovery=False), TZ)
+
+
 def _send_push(sub: dict, payload: dict, key_file: Path, contact: str) -> int | None:
     """Sends one notification. Returns the push service's status when it
     says the subscription is gone (404/410), else None."""
@@ -193,11 +233,17 @@ def today() -> date:
 
 
 class Hub:
-    def __init__(self, cal: cs.FamilyCalendar, store: Store, passcode: str, contact: str):
+    def __init__(self, cal: cs.FamilyCalendar, store: Store, passcode: str, contact: str,
+                 mailbox: school_mail.Mailbox | None = None, parent_passcode: str = ""):
         self.cal = cal
         self.store = store
         self.passcode = passcode
         self.token = session_token(store.secret(), passcode)
+        # School emails are for Julian and Sally only, so they sit behind a
+        # second passcode that only the parents' phones know.
+        self.mailbox = mailbox
+        self.parent_passcode = parent_passcode
+        self.parent_token = session_token(store.secret(), "parents:" + parent_passcode) if parent_passcode else None
         self.vapid_key, self.vapid_public = store.vapid()
         self.contact = contact
         self.failures: dict[str, list[float]] = {}
@@ -208,25 +254,60 @@ class Hub:
 
     @web.middleware
     async def auth(self, request: web.Request, handler):
-        if request.path.startswith("/api/") and request.path != "/api/login":
+        if request.path.startswith("/api/") and request.path not in ("/api/login", "/api/school/login"):
             given = request.headers.get("Authorization", "").removeprefix("Bearer ")
-            if not hmac.compare_digest(given.encode(), self.token.encode()):
+            need = self.parent_token if request.path.startswith("/api/school") else self.token
+            if not need or not hmac.compare_digest(given.encode(), need.encode()):
                 raise web.HTTPUnauthorized(text="Passcode needed")
         return await handler(request)
 
-    async def login(self, request: web.Request) -> web.Response:
+    async def _check_passcode(self, request: web.Request, passcode: str, token: str) -> web.Response:
         ip = request.headers.get("X-Forwarded-For", request.remote or "").split(",")[0].strip()
         now = clock.monotonic()
         recent = [t for t in self.failures.get(ip, []) if now - t < LOCKOUT]
         if len(recent) >= MAX_LOGIN_FAILURES:
             return web.json_response({"error": "Too many tries. Wait 15 minutes."}, status=429)
         body = await request.json()
-        if hmac.compare_digest(str(body.get("passcode", "")).strip().encode(), self.passcode.encode()):
+        if hmac.compare_digest(str(body.get("passcode", "")).strip().encode(), passcode.encode()):
             self.failures.pop(ip, None)
-            return web.json_response({"token": self.token})
+            return web.json_response({"token": token})
         self.failures[ip] = recent + [now]
         await asyncio.sleep(1)
         return web.json_response({"error": "That's not the passcode."}, status=403)
+
+    async def login(self, request: web.Request) -> web.Response:
+        return await self._check_passcode(request, self.passcode, self.token)
+
+    async def school_login(self, request: web.Request) -> web.Response:
+        if not self.parent_token:
+            return web.json_response({"error": "School emails aren't set up on the server yet."}, status=503)
+        return await self._check_passcode(request, self.parent_passcode, self.parent_token)
+
+    # --- school emails (parents only) ---
+
+    def _school_seen(self) -> dict[str, str]:
+        return self.state.setdefault("school_seen", {})
+
+    async def school(self, request: web.Request) -> web.Response:
+        if not self.mailbox:
+            return web.json_response({"error": "Gmail isn't signed in on the server yet."}, status=503)
+        d = today()
+        emails = await gcal(self.mailbox.recent, SCHOOL_SEEN_DAYS)
+        new, seen = school_lists(emails, self._school_seen(), d)
+        return web.json_response({"today": d.isoformat(), "new": new, "seen": seen})
+
+    async def school_seen(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        seen = self._school_seen()
+        if body.get("seen", True):
+            seen[request.match_info["id"]] = today().isoformat()
+        else:
+            seen.pop(request.match_info["id"], None)
+        # Forget swipes once the email has dropped off both lists.
+        cutoff = (today() - timedelta(days=SCHOOL_SEEN_DAYS + 7)).isoformat()
+        self.state["school_seen"] = {k: v for k, v in seen.items() if v >= cutoff}
+        self.store.write("state.json", self.state)
+        return web.json_response({"ok": True})
 
     # --- reading ---
 
@@ -369,7 +450,8 @@ async def errors(request: web.Request, handler):
         raise
     except Exception as e:
         log.exception("%s %s failed", request.method, request.path)
-        return web.json_response({"error": f"Couldn't reach the Family calendar ({type(e).__name__})"}, status=502)
+        where = "Gmail" if request.path.startswith("/api/school") else "the Family calendar"
+        return web.json_response({"error": f"Couldn't reach {where} ({type(e).__name__})"}, status=502)
     if isinstance(resp, web.FileResponse) or request.path == "/":
         # Small app; always check for a newer version.
         resp.headers["Cache-Control"] = "no-cache"
@@ -391,6 +473,9 @@ def make_app(hub: Hub) -> web.Application:
     app.router.add_get("/api/push/key", hub.vapid)
     app.router.add_post("/api/push/subscribe", hub.subscribe)
     app.router.add_post("/api/push/unsubscribe", hub.unsubscribe)
+    app.router.add_post("/api/school/login", hub.school_login)
+    app.router.add_get("/api/school", hub.school)
+    app.router.add_post("/api/school/{id}/seen", hub.school_seen)
 
     async def index(request):
         return web.FileResponse(STATIC / "index.html")
@@ -412,7 +497,8 @@ def main() -> None:
     if not passcode:
         raise SystemExit("Set WEB_PASSCODE")
     host = os.getenv("WEB_HOST", "localhost")
-    hub = Hub(_calendar(), Store(STATE_DIR), passcode, os.getenv("WEB_CONTACT") or f"https://{host}")
+    hub = Hub(_calendar(), Store(STATE_DIR), passcode, os.getenv("WEB_CONTACT") or f"https://{host}",
+              _mailbox(), os.getenv("PARENT_PASSCODE", "").strip())
     web.run_app(make_app(hub), host=os.getenv("WEB_BIND", "127.0.0.1"), port=int(os.getenv("WEB_PORT", "8080")))
 
 
