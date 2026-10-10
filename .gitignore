@@ -1,6 +1,8 @@
 .env
 service-account*.json
 google-services.json
+# The app's Firebase settings aren't secret, and CI needs them to build push in.
+!android/app/google-services.json
 __pycache__/
 *.pyc
 .venv/

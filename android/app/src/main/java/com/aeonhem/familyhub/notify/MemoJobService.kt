@@ -78,7 +78,6 @@ class MemoJobService : JobService() {
     override fun onStopJob(params: JobParameters): Boolean = false
 
     companion object {
-        const val CHANNEL = "memos"
         private const val SEEN_KEY = "notifiedMemos"
         private const val SEEN_MAX = 300
         private val lock = Any()
@@ -102,7 +101,9 @@ class MemoJobService : JobService() {
             val seen = stored?.split(',')?.mapNotNull { it.toLongOrNull() }.orEmpty()
             val fresh = memos.filter { it.eventId !in seen }
             // First ever run: just remember what's already there, so nobody gets a flood.
-            if (stored != null) fresh.forEach { notify(ctx, it) }
+            if (stored != null) fresh.forEach {
+                MemoAlerts.show(ctx, "Memo from ${it.from?.takeIf { f -> f.isNotBlank() } ?: "Someone"}", it.title, it.begin / 1000)
+            }
             if (stored == null || fresh.isNotEmpty()) {
                 val all = (seen + fresh.map { it.eventId }).distinct().takeLast(SEEN_MAX)
                 prefs.edit().putString(SEEN_KEY, all.joinToString(",")).apply()
@@ -114,27 +115,46 @@ class MemoJobService : JobService() {
             val addressed = to.isEmpty() || to.equals(me, true) || to.equals("Everyone", true) || to.equals("all", true)
             return addressed && !m.from.orEmpty().trim().equals(me, true)
         }
+    }
+}
 
-        private fun notify(ctx: Context, m: Item) {
-            if (Build.VERSION.SDK_INT >= 33 &&
-                ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-            ) return
-            val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Memos", NotificationManager.IMPORTANCE_HIGH))
-            val open = PendingIntent.getActivity(
-                ctx, 0,
-                Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-            val n = Notification.Builder(ctx, CHANNEL)
-                .setSmallIcon(android.R.drawable.stat_notify_chat)
-                .setContentTitle("Memo from ${m.from?.takeIf { it.isNotBlank() } ?: "Someone"}")
-                .setContentText(m.title)
-                .setStyle(Notification.BigTextStyle().bigText(m.title))
-                .setContentIntent(open)
-                .setAutoCancel(true)
-                .build()
-            nm.notify(m.eventId.hashCode(), n)
+/**
+ * Shows memo notifications for both the calendar check and server push, at
+ * most once per memo. The two only share the memo's start time (the phone
+ * and Google number events differently), which is unique enough here.
+ */
+object MemoAlerts {
+    const val CHANNEL = "memos"
+    private const val SHOWN_KEY = "shownMemoStarts"
+    private const val SHOWN_MAX = 300
+    private val lock = Any()
+
+    /** [beginSec] is the memo's start time in epoch seconds. */
+    fun show(ctx: Context, title: String, body: String, beginSec: Long) {
+        synchronized(lock) {
+            val prefs = ctx.getSharedPreferences("familyhub", Context.MODE_PRIVATE)
+            val shown = prefs.getString(SHOWN_KEY, null)?.split(',')?.mapNotNull { it.toLongOrNull() }.orEmpty()
+            if (beginSec in shown) return
+            prefs.edit().putString(SHOWN_KEY, (shown + beginSec).takeLast(SHOWN_MAX).joinToString(",")).apply()
         }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Memos", NotificationManager.IMPORTANCE_HIGH))
+        val open = PendingIntent.getActivity(
+            ctx, 0,
+            Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val n = Notification.Builder(ctx, CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        nm.notify(beginSec.hashCode(), n)
     }
 }

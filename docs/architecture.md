@@ -27,8 +27,10 @@ chores and memos appear in the Calendar app they use with no install at all.
 ```
 
 - **Storage and sync**: Google Calendar. Edits on any device show everywhere.
-- **Push to Android**: the app posts its own notification when a memo for
-  that phone's person arrives. (Not Google Calendar reminders: Google keeps
+- **Push to Android**: the family server sends each new memo to the
+  parents' phones through Firebase Cloud Messaging (free), which wakes an
+  idle phone. The app also watches the phone's calendar as a fallback, and
+  shows each memo once. (Not Google Calendar reminders: Google keeps
   reminders per person, so one set by the sender only buzzes the sender.)
 - **Push to Erlina**: the bot polls the calendar and DMs her anything new
   addressed to her. Discord DMs are normal iPhone notifications.

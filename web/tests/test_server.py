@@ -197,3 +197,93 @@ def test_weather_codes():
     assert server.weather_label(95) == "Thunderstorms"
     assert server.weather_icon(0, False) == "🌙"
     assert server.weather_icon(63, True) == "🌧️"
+
+
+# ---------- Android memo alerts (FCM) ----------
+
+import fcm  # noqa: E402
+
+
+class FakeCalendar:
+    def __init__(self, items):
+        self.list = items
+
+    def items(self, start, end):
+        return self.list
+
+
+class FakeSender:
+    def __init__(self, gone=()):
+        self.sent, self.gone = [], set(gone)
+
+    def send(self, token, data):
+        if token in self.gone:
+            raise fcm.Gone()
+        self.sent.append((token, data))
+
+
+def memo(event_id, from_, for_=None):
+    start = datetime(2026, 10, 9, 6, 50, 9, tzinfo=TZ)
+    return cs.Item(event_id, "memo", "Water the garden?", start.date(), start, False,
+                   {k: v for k, v in (("from", from_), ("for", for_)) if v})
+
+
+def test_fcm_message_is_data_only_and_high_priority():
+    msg = fcm.message("tok", {"title": "Memo from Sally", "begin": 5})["message"]
+    assert msg["token"] == "tok" and "notification" not in msg
+    assert msg["data"] == {"title": "Memo from Sally", "begin": "5"}
+    assert msg["android"]["priority"] == "HIGH"
+
+
+def test_fcm_gone_tokens():
+    assert fcm.is_gone(404, "")
+    assert fcm.is_gone(400, '{"error": {"message": "The registration token is not a valid FCM registration token"}}')
+    assert not fcm.is_gone(400, '{"error": {"message": "Invalid JSON payload"}}')
+    assert not fcm.is_gone(500, "")
+
+
+def test_phone_alert_carries_begin_seconds():
+    data = server.phone_alert(memo("e1", "Sally"))
+    assert data["title"] == "Memo from Sally" and data["body"] == "Water the garden?" and data["memo"] == "e1"
+    assert data["begin"] == str(int(datetime(2026, 10, 9, 6, 50, 9, tzinfo=TZ).timestamp()))
+
+
+def test_new_memos_reach_phones_but_not_the_sender(tmp_path):
+    store = server.Store(tmp_path)
+    store.write("phones.json", [{"person": "Julian", "token": "j"}, {"person": "Sally", "token": "s"},
+                                {"person": "Julian", "token": "old"}])
+    sender = FakeSender(gone={"old"})
+    cal = FakeCalendar([memo("e0", "Sally")])
+    hub = server.Hub(cal, store, "family", "https://x", None, "parents", sender)
+
+    async def go():
+        await hub.deliver_memos()  # first run only remembers what's there
+        cal.list = [memo("e0", "Sally"), memo("e1", "Sally"), memo("e2", "Julian", "Erlina")]
+        await hub.deliver_memos()
+        await hub.deliver_memos()  # nothing twice
+    import asyncio
+    asyncio.run(go())
+    assert [(t, d["memo"]) for t, d in sender.sent] == [("j", "e1")]
+    # The token Firebase said is gone is forgotten.
+    assert [p["token"] for p in store.read("phones.json", [])] == ["j", "s"]
+
+
+def test_phone_register_needs_the_parents_passcode(tmp_path):
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x", None, "parents")
+    run_client(hub, lambda client: _phone_api(client, tmp_path))
+
+
+async def _phone_api(client, tmp_path):
+    family = (await (await client.post("/api/login", json={"passcode": "family"})).json())["token"]
+    body = {"person": "Julian", "token": "abc"}
+    assert (await client.post("/api/phone/register", json=body,
+                              headers={"Authorization": f"Bearer {family}"})).status == 401
+    parents = (await (await client.post("/api/school/login", json={"passcode": "parents"})).json())["token"]
+    auth = {"Authorization": f"Bearer {parents}"}
+    resp = await client.post("/api/phone/register", json=body, headers=auth)
+    assert resp.status == 200 and (await resp.json())["push"] is False  # no Firebase key on this server
+    await client.post("/api/phone/register", json={"person": "Sally", "token": "abc"}, headers=auth)
+    assert server.Store(tmp_path).read("phones.json", []) == [{"person": "Sally", "token": "abc"}]
+    assert (await client.post("/api/phone/register", json={"person": "Bob", "token": "x"}, headers=auth)).status == 400
+    await client.post("/api/phone/unregister", json={"token": "abc"}, headers=auth)
+    assert server.Store(tmp_path).read("phones.json", []) == []

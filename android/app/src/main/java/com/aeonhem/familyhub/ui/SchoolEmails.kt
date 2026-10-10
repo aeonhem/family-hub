@@ -50,6 +50,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aeonhem.familyhub.data.NeedsPasscode
 import com.aeonhem.familyhub.data.SchoolEmail
 import com.aeonhem.familyhub.data.SchoolMailClient
+import com.aeonhem.familyhub.notify.MemoPush
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -97,6 +98,8 @@ class SchoolViewModel(app: Application) : AndroidViewModel(app) {
             result.onSuccess { t ->
                 token = t
                 prefs.edit().putString("schoolToken", t).apply()
+                // The same passcode turns on memo push for this phone.
+                MemoPush.register(getApplication<Application>())
                 _state.update { it.copy(linked = true) }
                 refresh()
             }.onFailure { failed(it) }

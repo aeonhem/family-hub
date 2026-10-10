@@ -33,6 +33,7 @@ HERE = Path(__file__).resolve().parent
 BOT_DIR = Path(os.getenv("BOT_DIR", HERE.parent / "bot"))
 sys.path.insert(0, str(BOT_DIR))
 import calendar_store as cs  # noqa: E402
+import fcm  # noqa: E402
 import school_mail  # noqa: E402
 
 load_dotenv(HERE / ".env")  # local runs; on the server systemd passes /etc/familyhub-web.env
@@ -117,10 +118,21 @@ def school_lists(emails: list[school_mail.Email], seen: dict[str, str], d: date)
 
 
 def memo_recipients(memo: cs.Item, subs: list[dict]) -> list[dict]:
-    """Subscriptions that should buzz for [memo]: addressed to that person (or
-    everyone), and not the person who sent it."""
+    """Subscriptions (or Android phones) that should buzz for [memo]: addressed
+    to that person (or everyone), and not the person who sent it."""
     sender = (memo.from_who or "").lower()
     return [s for s in subs if memo.is_for(s["person"]) and s["person"].lower() != sender]
+
+
+def phone_alert(memo: cs.Item) -> dict[str, str]:
+    """What the Android app gets. [begin] (epoch seconds) lets it skip a memo
+    its own calendar check already showed."""
+    return {
+        "title": f"Memo from {memo.from_who or 'the family'}",
+        "body": memo.title,
+        "memo": memo.event_id,
+        "begin": str(int(memo.start.timestamp())) if memo.start else "",
+    }
 
 
 def morning_text(items: list[cs.Item], d: date, name: str) -> str:
@@ -299,7 +311,8 @@ def today() -> date:
 
 class Hub:
     def __init__(self, cal: cs.FamilyCalendar, store: Store, passcode: str, contact: str,
-                 mailbox: school_mail.Mailbox | None = None, parent_passcode: str = ""):
+                 mailbox: school_mail.Mailbox | None = None, parent_passcode: str = "",
+                 phones_sender: fcm.Sender | None = None):
         self.cal = cal
         self.store = store
         self.passcode = passcode
@@ -313,6 +326,9 @@ class Hub:
         self.contact = contact
         self.failures: dict[str, list[float]] = {}
         self.subs: list[dict] = store.read("subscriptions.json", [])
+        # Android phones (Julian's and Sally's) for memo alerts through FCM.
+        self.fcm = phones_sender
+        self.phones: list[dict] = store.read("phones.json", [])
         self.state: dict = store.read("state.json", {})
         self.weather_cache: dict | None = None
         self.weather_retry_at = 0.0
@@ -324,7 +340,9 @@ class Hub:
     async def auth(self, request: web.Request, handler):
         if request.path.startswith("/api/") and request.path not in ("/api/login", "/api/school/login"):
             given = request.headers.get("Authorization", "").removeprefix("Bearer ")
-            need = self.parent_token if request.path.startswith("/api/school") else self.token
+            # The Android app is only on the parents' phones, so it uses their passcode.
+            parents_only = request.path.startswith(("/api/school", "/api/phone"))
+            need = self.parent_token if parents_only else self.token
             if not need or not hmac.compare_digest(given.encode(), need.encode()):
                 raise web.HTTPUnauthorized(text="Passcode needed")
         return await handler(request)
@@ -464,6 +482,37 @@ class Hub:
         self.store.write("subscriptions.json", self.subs)
         return web.json_response({"ok": True})
 
+    # --- Android phones (FCM) ---
+
+    async def phone_register(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        person, token = name_or_none(body.get("person")), str(body.get("token") or "").strip()
+        if not person or not token or len(token) > 4096:
+            raise web.HTTPBadRequest(text="Bad phone")
+        self.phones = [p for p in self.phones if p["token"] != token] + [{"person": person, "token": token}]
+        self.store.write("phones.json", self.phones)
+        return web.json_response({"ok": True, "push": self.fcm is not None})
+
+    async def phone_unregister(self, request: web.Request) -> web.Response:
+        token = (await request.json()).get("token")
+        self.phones = [p for p in self.phones if p["token"] != token]
+        self.store.write("phones.json", self.phones)
+        return web.json_response({"ok": True})
+
+    async def push_phones(self, phones: list[dict], data: dict[str, str]) -> None:
+        if not self.fcm:
+            return
+        loop = asyncio.get_running_loop()
+        for p in phones:
+            try:
+                await loop.run_in_executor(_push, self.fcm.send, p["token"], data)
+            except fcm.Gone:
+                log.info("dropping %s's old phone token", p["person"])
+                self.phones = [q for q in self.phones if q["token"] != p["token"]]
+                self.store.write("phones.json", self.phones)
+            except Exception:
+                log.exception("phone alert to %s failed", p["person"])
+
     async def push(self, subs: list[dict], payload: dict) -> None:
         loop = asyncio.get_running_loop()
         for s in subs:
@@ -493,6 +542,7 @@ class Hub:
                     "title": f"Memo from {m.from_who or 'the family'}",
                     "body": m.title, "tag": m.event_id, "url": "/?tab=memos",
                 })
+                await self.push_phones(memo_recipients(m, self.phones), phone_alert(m))
         self.state["seen_memos"] = (self.state.get("seen_memos", []) + [m.event_id for m in new])[-500:]
         self.store.write("state.json", self.state)
 
@@ -556,6 +606,8 @@ def make_app(hub: Hub) -> web.Application:
     app.router.add_get("/api/push/key", hub.vapid)
     app.router.add_post("/api/push/subscribe", hub.subscribe)
     app.router.add_post("/api/push/unsubscribe", hub.unsubscribe)
+    app.router.add_post("/api/phone/register", hub.phone_register)
+    app.router.add_post("/api/phone/unregister", hub.phone_unregister)
     app.router.add_post("/api/school/login", hub.school_login)
     app.router.add_get("/api/school", hub.school)
     app.router.add_post("/api/school/{id}/seen", hub.school_seen)
@@ -574,6 +626,15 @@ def make_app(hub: Hub) -> web.Application:
     return app
 
 
+def _phones_sender() -> fcm.Sender | None:
+    """Firebase, if its service account key has been put on the server."""
+    key = Path(os.getenv("FCM_SERVICE_ACCOUNT", STATE_DIR / "fcm_service_account.json"))
+    if not key.exists():
+        log.info("no %s, so Android memo alerts are off", key)
+        return None
+    return fcm.Sender(key)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     passcode = os.getenv("WEB_PASSCODE", "").strip()
@@ -581,7 +642,7 @@ def main() -> None:
         raise SystemExit("Set WEB_PASSCODE")
     host = os.getenv("WEB_HOST", "localhost")
     hub = Hub(_calendar(), Store(STATE_DIR), passcode, os.getenv("WEB_CONTACT") or f"https://{host}",
-              _mailbox(), os.getenv("PARENT_PASSCODE", "").strip())
+              _mailbox(), os.getenv("PARENT_PASSCODE", "").strip(), _phones_sender())
     web.run_app(make_app(hub), host=os.getenv("WEB_BIND", "127.0.0.1"), port=int(os.getenv("WEB_PORT", "8080")))
 
 

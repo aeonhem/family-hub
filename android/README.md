@@ -25,6 +25,13 @@ still works; turn them on later in Android Settings > Apps > Family Hub.
 The first check after installing only notes the memos already there, so
 older ones don't all pop up at once.
 
+Android pauses that check while the phone sits idle, so the family server
+also pushes each memo through Firebase Cloud Messaging, which wakes the
+phone. That starts once `app/google-services.json` is in the repo (see
+[../web/README.md](../web/README.md#memo-alerts-on-the-android-app-firebase))
+and you've entered the parents' passcode in the school emails card. Either
+way a memo only buzzes once.
+
 CI publishes a shrunk release build. Every build is signed with the same
 committed key and has a higher version number, so new versions install over
 the old one.

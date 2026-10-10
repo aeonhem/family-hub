@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
+        android:name=".FamilyHubApplication"
         android:allowBackup="true"
         android:label="@string/app_name"
         android:icon="@android:drawable/ic_menu_my_calendar"
@@ -25,6 +26,13 @@
             android:name=".notify.MemoJobService"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+        <service
+            android:name=".notify.MemoPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <receiver
             android:name=".notify.BootReceiver"
             android:exported="true">
