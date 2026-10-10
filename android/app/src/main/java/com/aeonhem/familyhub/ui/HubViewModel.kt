@@ -14,6 +14,7 @@ import com.aeonhem.familyhub.data.Item
 import com.aeonhem.familyhub.data.Weather
 import com.aeonhem.familyhub.data.WeatherSource
 import com.aeonhem.familyhub.notify.MemoJobs
+import com.aeonhem.familyhub.notify.MemoPush
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -115,6 +116,8 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) { repo.ensureSynced(it) }
                 MemoJobs.schedule(getApplication<Application>())
             }
+            // Re-sent on every start, so the server always has this phone's current push token.
+            MemoPush.register(getApplication<Application>())
             refresh()
         }
     }
@@ -122,6 +125,7 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
     fun setMe(name: String) {
         prefs.edit().putString("me", name).apply()
         _state.update { it.copy(me = name) }
+        MemoPush.register(getApplication<Application>())
     }
 
     fun chooseCalendar(cal: CalendarInfo) {

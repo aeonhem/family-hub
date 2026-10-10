@@ -77,3 +77,28 @@ the calendar one. To set it up (once):
    `sudo bash web/deploy/setup.sh --parents 'parents passcode'`.
 5. On each parent's phone, open Family Hub and type that passcode into the
    Arcadia emails card once.
+
+## Memo alerts on the Android app (Firebase)
+
+The Android app's own check reads the phone's calendar, and Android pauses it
+while the phone is idle, so a memo could wait until the app was opened. The
+server now also sends each new memo to Julian's and Sally's phones through
+Firebase Cloud Messaging (free), which wakes an idle phone. It skips the
+person who wrote the memo; Erlina keeps getting hers from the bot and Web Push.
+A memo still only buzzes once if both get there.
+
+Set up once:
+
+1. At https://console.firebase.google.com (signed in as Julian), **Create a
+   project**, choose the existing **Family Hub** Google Cloud project, and
+   skip Google Analytics. The free Spark plan is all it needs.
+2. Add an **Android** app with package name `com.aeonhem.familyhub` and
+   download `google-services.json`. Commit it as
+   `android/app/google-services.json` (it isn't secret); the next APK build
+   has push in it.
+3. Project settings > **Service accounts** > **Generate new private key**.
+   Copy that file to the server and run
+   `sudo bash web/deploy/setup.sh --fcm-key fcm_service_account.json`, then
+   delete the copy.
+4. Each phone registers itself once its person is picked and the parents'
+   passcode has been entered in the school emails card.

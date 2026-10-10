@@ -1,8 +1,28 @@
+import groovy.json.JsonSlurper
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Firebase's app settings (not secret) for memo push. Read here instead of
+// through the google-services plugin so the app still builds, with push off,
+// until android/app/google-services.json is added.
+val firebase: Map<String, String> = file("google-services.json").takeIf { it.exists() }?.let { f ->
+    @Suppress("UNCHECKED_CAST")
+    val json = JsonSlurper().parse(f) as Map<String, Any?>
+    val info = json["project_info"] as Map<*, *>
+    val client = (json["client"] as List<Map<*, *>>).first {
+        ((it["client_info"] as Map<*, *>)["android_client_info"] as Map<*, *>)["package_name"] == "com.aeonhem.familyhub"
+    }
+    mapOf(
+        "FCM_PROJECT_ID" to info["project_id"].toString(),
+        "FCM_SENDER_ID" to info["project_number"].toString(),
+        "FCM_APP_ID" to (client["client_info"] as Map<*, *>)["mobilesdk_app_id"].toString(),
+        "FCM_API_KEY" to (client["api_key"] as List<Map<*, *>>).first()["current_key"].toString(),
+    )
+}.orEmpty()
 
 android {
     namespace = "com.aeonhem.familyhub"
@@ -17,6 +37,9 @@ android {
         val build = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionCode = build
         versionName = "0.1.$build"
+        listOf("FCM_PROJECT_ID", "FCM_SENDER_ID", "FCM_APP_ID", "FCM_API_KEY").forEach {
+            buildConfigField("String", it, "\"${firebase[it].orEmpty()}\"")
+        }
     }
 
     signingConfigs {
@@ -64,6 +87,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -79,6 +103,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Memo push from the family server. Free, and wakes an idle phone.
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
     testImplementation("junit:junit:4.13.2")
     // Android's own org.json is a stub in unit tests; this is the real one.
     testImplementation("org.json:json:20240303")
