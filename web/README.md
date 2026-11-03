@@ -150,3 +150,35 @@ Set up once:
 
 New lights added in Smart Life show up in the tab by themselves. Bulbs and
 strips get a brightness slider; plugs and switches get on/off.
+
+## Bring! shopping list
+
+The **Shopping** tab, in the web app and on the parents' Android app, shows
+the family's Bring! list: add items (with an optional note like "2 litres"),
+tick off what's bought, and re-add something from **Bought recently** with
+one tap. Changes show up in the Bring! app too, and the other way round.
+
+Bring! has no official API, so the server signs in like the Bring! app does
+(through the `bring-api` package). Give it its own helper account, so no
+one's real Bring! password sits on the server:
+
+1. Make a new Bring! account for Family Hub (any email you control, e.g. a
+   `+familyhub` alias).
+2. In your own Bring! app, open the family list and invite that account to
+   it. Accept the invite once by signing in to the Bring! app as the helper.
+3. Make `bring.json` (keep it private, it's in .gitignore). `list` is the
+   family list's name as it shows in Bring!:
+
+   ```json
+   {
+     "email": "...",
+     "password": "...",
+     "list": "Family"
+   }
+   ```
+
+4. Try it from the PC first: `python web/shopping.py bring.json` shows the
+   list it picked and every list the account can see.
+5. Put it on the server: `bash deploy_server.sh bring.json` from the PC (or
+   copy it there and run `sudo bash web/deploy/setup.sh --bring bring.json`),
+   then delete any copy on the server.

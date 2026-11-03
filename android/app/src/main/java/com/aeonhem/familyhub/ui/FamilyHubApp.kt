@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.Today
 import androidx.compose.material3.AlertDialog
@@ -64,6 +65,7 @@ private enum class Tab(val label: String, val heading: String, val icon: ImageVe
     DINNER("Dinner", "Dinner this week", Icons.Outlined.Restaurant),
     CHORES("Chores", "Chores", Icons.Outlined.TaskAlt),
     MEMOS("Memos", "Memos", Icons.Outlined.Campaign),
+    SHOPPING("Shopping", "Shopping", Icons.Outlined.ShoppingCart, parentsOnly = true),
     LIGHTS("Lights", "Lights", Icons.Outlined.Lightbulb, parentsOnly = true),
 }
 
@@ -120,7 +122,7 @@ private fun MainScaffold(vm: HubViewModel, s: HubState) {
                         selected = tab == t,
                         onClick = { tab = t },
                         icon = { Icon(t.icon, contentDescription = null) },
-                        label = { Text(t.label, fontWeight = FontWeight.Bold) },
+                        label = { Text(t.label, fontWeight = FontWeight.Bold, maxLines = 1) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = Hub.Teal,
                             selectedTextColor = Hub.TealText,
@@ -165,6 +167,7 @@ private fun MainScaffold(vm: HubViewModel, s: HubState) {
                 Tab.DINNER -> item { DinnerScreen(s, vm) }
                 Tab.CHORES -> item { ChoresScreen(s, vm) }
                 Tab.MEMOS -> item { MemosScreen(s, vm) }
+                Tab.SHOPPING -> item { ShoppingScreen() }
                 Tab.LIGHTS -> item { LightsScreen() }
             }
         }

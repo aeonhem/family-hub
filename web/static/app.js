@@ -25,6 +25,7 @@ const ICON = {
   chores: 'M22 5.18 10.59 16.6l-4.24-4.24 1.41-1.41 2.83 2.83 10-10L22 5.18zm-2.21 5.04c.13.57.21 1.17.21 1.78 0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8c1.58 0 3.04.46 4.28 1.25l1.44-1.44A9.9 9.9 0 0 0 12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10c0-1.19-.22-2.33-.6-3.39l-1.61 1.61z',
   memos: 'M18 11v2h4v-2h-4zm-2 6.61c.96.71 2.21 1.65 3.2 2.39.4-.53.8-1.07 1.2-1.6-.99-.74-2.24-1.68-3.2-2.4-.4.54-.8 1.08-1.2 1.61zM20.4 5.6c-.4-.53-.8-1.07-1.2-1.6-.99.74-2.24 1.68-3.2 2.4.4.53.8 1.07 1.2 1.6.96-.72 2.21-1.65 3.2-2.4zM4 9c-1.1 0-2 .9-2 2v2c0 1.1.9 2 2 2h1v4h2v-4h1l5 3V6L8 9H4zm5.03 1.71L11 9.53v4.94l-1.97-1.18-.48-.29H4v-2h4.55l.48-.29zM15.5 12c0-1.33-.58-2.53-1.5-3.35v6.69c.92-.81 1.5-2.01 1.5-3.34z',
   lights: 'M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7zm2.85 11.1-.85.6V16h-4v-2.3l-.85-.6A4.997 4.997 0 0 1 7 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.63-.8 3.16-2.15 4.1z',
+  shopping: 'M15.55 13c.75 0 1.41-.41 1.75-1.03l3.58-6.49A.996.996 0 0 0 20.01 4H5.21l-.94-2H1v2h2l3.6 7.59-1.35 2.44C4.52 15.37 5.48 17 7 17h12v-2H7l1.1-2h7.45zM6.16 6h12.15l-2.76 5H8.53L6.16 6zM7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z',
   check: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
   settings: 'M19.43 12.98c.04-.32.07-.64.07-.98 0-.34-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65A.488.488 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1a.566.566 0 0 0-.18-.03c-.17 0-.34.09-.43.25l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98 0 .33.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46a.5.5 0 0 0 .61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.06.02.12.03.18.03.17 0 .34-.09.43-.25l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zm-1.98-1.71c.04.31.05.52.05.73 0 .21-.02.43-.05.73l-.14 1.13.89.7 1.08.84-.7 1.21-1.27-.51-1.04-.42-.9.68c-.43.32-.84.56-1.25.73l-1.06.43-.16 1.13-.2 1.35h-1.4l-.19-1.35-.16-1.13-1.06-.43c-.43-.18-.83-.41-1.23-.71l-.91-.7-1.06.43-1.27.51-.7-1.21 1.08-.84.89-.7-.14-1.13c-.03-.31-.05-.54-.05-.74s.02-.43.05-.73l.14-1.13-.89-.7-1.08-.84.7-1.21 1.27.51 1.04.42.9-.68c.43-.32.84-.56 1.25-.73l1.06-.43.16-1.13.2-1.35h1.39l.19 1.35.16 1.13 1.06.43c.43.18.83.41 1.23.71l.91.7 1.06-.43 1.27-.51.7 1.21-1.07.85-.89.7.14 1.13zM12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z',
 };
@@ -35,6 +36,7 @@ const TABS = [
   { id: 'dinner', label: 'Dinner', heading: 'Dinner this week', icon: 'dinner' },
   { id: 'chores', label: 'Chores', heading: 'Chores', icon: 'chores' },
   { id: 'memos', label: 'Memos', heading: 'Memos', icon: 'memos' },
+  { id: 'shopping', label: 'Shopping', heading: 'Shopping', icon: 'shopping' },
   { id: 'lights', label: 'Lights', heading: 'Lights', icon: 'lights' },
 ];
 
@@ -106,6 +108,10 @@ const S = {
   lights: null, // null until loaded
   scenes: [],
   lightsError: '',
+  shopping: null, // {list, items, recent} from Bring!, null until loaded
+  shoppingError: '',
+  shopName: '',
+  shopNote: '',
 };
 if (!TABS.some((t) => t.id === S.tab)) S.tab = 'today';
 if (!THEMES.some((t) => t.id === S.theme)) S.theme = 'teal';
@@ -196,6 +202,31 @@ async function setLight(id, body, local) {
   lightsSettle = setTimeout(loadLights, LIGHTS_SETTLE_MS);
 }
 
+let shoppingLoading = false;
+async function loadShopping() {
+  if (!S.token || !S.me || S.tab !== 'shopping' || shoppingLoading) return;
+  shoppingLoading = true;
+  try {
+    S.shopping = await api('/api/shopping'); S.shoppingError = '';
+  } catch (e) {
+    S.shoppingError = e.message;
+  } finally {
+    shoppingLoading = false;
+  }
+  render();
+}
+
+// Changes show straight away; the list is then read back from Bring!.
+async function shop(path, body, okText) {
+  try {
+    await api(path, body);
+    if (okText) snack(okText);
+  } catch (e) {
+    snack(e.message);
+  }
+  await loadShopping();
+}
+
 async function write(path, body, okText) {
   try {
     await api(path, body);
@@ -255,6 +286,7 @@ function mainScreen() {
   const tab = TABS.find((t) => t.id === S.tab);
   let body = '<p class="empty">Loading…</p>';
   if (S.tab === 'lights') body = lightsTab();
+  else if (S.tab === 'shopping') body = shoppingTab();
   else if (S.loaded) body = { today: todayTab, dinner: dinnerTab, chores: choresTab, memos: memosTab }[S.tab]();
   return `<main class="main">
     <header class="header">
@@ -444,6 +476,36 @@ function memoMeta(m, withTo = false) {
   return withTo ? `${who} to ${to} · ${when}` : `${who}, ${when}`;
 }
 
+// ---------- Shopping (Bring!) ----------
+
+function shoppingTab() {
+  const sh = S.shopping;
+  if (sh === null) {
+    return `<p class="empty padded">${S.shoppingError ? esc(S.shoppingError) : 'Opening the shopping list…'}</p>`;
+  }
+  const onList = new Set(sh.items.map((i) => i.name.toLowerCase()));
+  const recent = sh.recent.filter((i) => !onList.has(i.name.toLowerCase()));
+  return `<div class="stack tight">
+    ${S.shoppingError ? `<div class="error-text">${esc(S.shoppingError)}</div>` : ''}
+    <section class="card">
+      <div class="field"><input id="shop-name" maxlength="60" placeholder=" " autocomplete="off" value="${esc(S.shopName)}"><label for="shop-name">Add an item</label></div>
+      <div class="field"><input id="shop-note" maxlength="80" placeholder=" " autocomplete="off" value="${esc(S.shopNote)}"><label for="shop-note">Note, e.g. 2 litres (optional)</label></div>
+      <button class="btn block" data-action="shop-add" ${S.shopName.trim() ? '' : 'disabled'}>Add to ${esc(sh.list)}</button>
+    </section>
+    <section class="card">
+      <div class="card-head"><span class="card-title">${esc(sh.list)}</span><span class="small-muted">${sh.items.length} to buy</span></div>
+      ${sh.items.length ? sh.items.map((i) => `<button class="chore" role="checkbox" aria-checked="false" data-action="shop-done" data-id="${esc(i.id)}" aria-label="Got ${esc(i.name)}">
+          <span class="box"></span>
+          <span><span class="name">${esc(i.name)}</span>${i.note ? `<span class="sub">${esc(i.note)}</span>` : ''}</span>
+        </button>`).join('') : '<div class="empty">Nothing to buy. Nice.</div>'}
+    </section>
+    ${recent.length ? `<section class="card">
+      <div class="card-title">Bought recently</div>
+      <div class="pills">${recent.map((i) => `<button class="pill" data-action="shop-again" data-name="${esc(i.name)}" data-note="${esc(i.note)}">${esc(i.name)}</button>`).join('')}</div>
+    </section>` : ''}
+  </div>`;
+}
+
 // ---------- Lights ----------
 
 function lightsTab() {
@@ -561,7 +623,30 @@ const actions = {
     S.tab = el.dataset.tab; store.set('tab', S.tab);
     history.replaceState(null, '', '/');
     render(); window.scrollTo(0, 0);
-    loadLights();
+    loadLights(); loadShopping();
+  },
+
+  'shop-add'() {
+    const name = S.shopName.trim(), note = S.shopNote.trim();
+    if (!name) return;
+    S.shopName = ''; S.shopNote = '';
+    if (S.shopping) S.shopping.items.push({ id: '', name, note });
+    render(); focusSoon('shop-name');
+    shop('/api/shopping', { name, note }, `Added ${name}`);
+  },
+  'shop-again'(el) {
+    const { name, note } = el.dataset;
+    S.shopping.items.push({ id: '', name, note });
+    render();
+    shop('/api/shopping', { name, note }, `Added ${name}`);
+  },
+  'shop-done'(el) {
+    // A just-added item has no id until the list is read back from Bring!.
+    const item = el.dataset.id && S.shopping.items.find((i) => i.id === el.dataset.id);
+    if (!item) return;
+    S.shopping.items = S.shopping.items.filter((i) => i !== item);
+    render();
+    shop(`/api/shopping/${encodeURIComponent(item.id)}/done`, {}, `Got ${item.name}`);
   },
 
   'light-toggle'(el) {
@@ -652,7 +737,11 @@ document.addEventListener('click', (ev) => {
 
 document.addEventListener('input', (ev) => {
   const t = ev.target;
-  if (t.id === 'memo-body') {
+  if (t.id === 'shop-name' || t.id === 'shop-note') {
+    S[t.id === 'shop-name' ? 'shopName' : 'shopNote'] = t.value;
+    const btn = document.querySelector('[data-action="shop-add"]');
+    if (btn) btn.disabled = !S.shopName.trim();
+  } else if (t.id === 'memo-body') {
     S.memoBody = t.value;
     const btn = document.querySelector('[data-action="send-memo"]');
     if (btn) btn.disabled = !S.memoBody.trim();
@@ -677,6 +766,7 @@ document.addEventListener('change', (ev) => {
 
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && S.dialog) { S.dialog = null; render(); }
+  if (ev.key === 'Enter' && (ev.target.id === 'shop-name' || ev.target.id === 'shop-note')) actions['shop-add']();
   if (ev.key === 'Enter' && S.dialog && S.dialog.type !== 'settings' && ev.target.tagName === 'INPUT') {
     const btn = document.querySelector('.dialog .btn');
     if (btn && !btn.disabled) btn.click();
@@ -787,12 +877,13 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); loadWeather(); loadLights(); } });
-setInterval(() => { if (!document.hidden && !S.dialog) { refresh(); loadLights(); } }, REFRESH_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); loadWeather(); loadLights(); loadShopping(); } });
+setInterval(() => { if (!document.hidden && !S.dialog) { refresh(); loadLights(); loadShopping(); } }, REFRESH_MS);
 setInterval(() => { if (!document.hidden) loadWeather(); }, 5 * 60 * 1000);
 
 render();
 refresh();
 loadWeather();
 loadLights();
+loadShopping();
 syncPush();

@@ -12,6 +12,8 @@ set -euo pipefail
 #   sudo bash web/deploy/setup.sh --fcm-key fcm_service_account.json
 # Smart Life lights (Tuya project keys, see web/README.md):
 #   sudo bash web/deploy/setup.sh --tuya tuya.json
+# Bring! shopping list (a helper Bring! account, see web/README.md):
+#   sudo bash web/deploy/setup.sh --bring bring.json
 ENV=/etc/familyhub-web.env
 APP=/opt/family-hub/web
 STATE=/var/lib/familyhub-web
@@ -38,6 +40,13 @@ case "${1:-}" in
     install -m 600 -o familyhub -g familyhub "$2" "$STATE/tuya.json"
     systemctl restart familyhub-web
     echo "Smart Life keys installed. The Lights tab is on."
+    exit 0 ;;
+  --bring)
+    [ -f "${2:-}" ] || { echo "Usage: sudo bash web/deploy/setup.sh --bring bring.json"; exit 1; }
+    install -d -m 700 -o familyhub -g familyhub "$STATE"
+    install -m 600 -o familyhub -g familyhub "$2" "$STATE/bring.json"
+    systemctl restart familyhub-web
+    echo "Bring! sign-in installed. The Shopping tab is on."
     exit 0 ;;
   --parents)
     [ -n "${2:-}" ] && [ -f "$ENV" ] || { echo "Usage: sudo bash web/deploy/setup.sh --parents 'parents passcode' (after the first setup)"; exit 1; }
