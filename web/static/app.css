@@ -104,6 +104,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 }
 .nav button {
   flex: 1;
+  min-width: 0;
   max-width: 140px;
   display: flex;
   flex-direction: column;
@@ -114,7 +115,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
   font-weight: 700;
 }
 .nav .pill-ind {
-  width: 64px; height: 32px;
+  width: 100%; max-width: 64px; height: 32px;
   border-radius: 16px;
   display: grid; place-items: center;
   transition: background-color 0.15s;

@@ -82,6 +82,17 @@ data class LightsState(
     val error: String? = null,
 )
 
+/**
+ * Swaps the parents' passcode for the server token this phone keeps (the same
+ * one the school emails, lights and shopping list use) and registers for memo alerts.
+ */
+suspend fun linkParents(app: Application, passcode: String): Result<Unit> = withContext(Dispatchers.IO) {
+    runCatching { SchoolMailClient().login(passcode.trim()) }
+}.map { t ->
+    app.getSharedPreferences("familyhub", Context.MODE_PRIVATE).edit().putString("schoolToken", t).apply()
+    MemoPush.register(app)
+}
+
 class LightsViewModel(app: Application) : AndroidViewModel(app) {
     private val client = LightsClient()
     private val prefs = app.getSharedPreferences("familyhub", Context.MODE_PRIVATE)
@@ -105,12 +116,7 @@ class LightsViewModel(app: Application) : AndroidViewModel(app) {
     fun link(passcode: String) {
         viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
-            val result = withContext(Dispatchers.IO) { runCatching { SchoolMailClient().login(passcode.trim()) } }
-            result.onSuccess { t ->
-                prefs.edit().putString("schoolToken", t).apply()
-                MemoPush.register(getApplication<Application>())
-                refresh()
-            }.onFailure { failed(it) }
+            linkParents(getApplication(), passcode).onSuccess { refresh() }.onFailure { failed(it) }
         }
     }
 
@@ -152,7 +158,8 @@ fun LightsScreen(vm: LightsViewModel = viewModel()) {
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (!s.linked) {
-            LinkLights(s, vm)
+            LinkParents("Enter the parents' passcode once to control the lights from here.", "Show the lights",
+                s.error, s.loading, vm::link)
             return@Column
         }
         s.error?.let { Text(it, color = Hub.MemoInk, fontSize = 13.sp) }
@@ -282,14 +289,15 @@ private fun LightCard(light: Light, scenes: List<LightScene>, vm: LightsViewMode
     }
 }
 
+/** Asks for the parents' passcode once, for the server features on this phone. */
 @Composable
-private fun LinkLights(s: LightsState, vm: LightsViewModel) {
+fun LinkParents(prompt: String, action: String, error: String?, loading: Boolean, onLink: (String) -> Unit) {
     var code by remember { mutableStateOf("") }
     Column(
         Modifier.fillMaxWidth().background(Hub.Card, RoundedCornerShape(20.dp)).padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("Enter the parents' passcode once to control the lights from here.", color = Hub.Muted, fontSize = 14.sp)
+        Text(prompt, color = Hub.Muted, fontSize = 14.sp)
         OutlinedTextField(
             value = code,
             onValueChange = { code = it },
@@ -299,7 +307,7 @@ private fun LinkLights(s: LightsState, vm: LightsViewModel) {
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
         )
-        s.error?.let { Text(it, color = Hub.MemoInk, fontSize = 13.sp) }
-        Button(onClick = { vm.link(code) }, enabled = code.isNotBlank() && !s.loading) { Text("Show the lights") }
+        error?.let { Text(it, color = Hub.MemoInk, fontSize = 13.sp) }
+        Button(onClick = { onLink(code) }, enabled = code.isNotBlank() && !loading) { Text(action) }
     }
 }

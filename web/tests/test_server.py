@@ -439,3 +439,116 @@ def test_sent_state_shows_until_the_device_reports():
     fresh = {**LAMP, "update_time": 3000}
     assert lights.light_json(lights.with_sent(fresh, sent))["mode"] == "white"
     assert lights.with_sent(stale, None) is stale
+
+
+# ---------- Bring! shopping list ----------
+
+import shopping  # noqa: E402
+
+
+class FakeShopping:
+    def __init__(self):
+        self.list = [{"id": "u1", "name": "Milk", "note": "low fat"}]
+        self.added = []
+
+    async def items(self):
+        return {"list": "Family", "items": self.list, "recent": []}
+
+    async def add(self, name, note=""):
+        self.added.append((name, note))
+
+    async def done(self, item_id):
+        if item_id == "down":
+            raise shopping.ShoppingError("Can't reach Bring! right now")
+        if not any(i["id"] == item_id for i in self.list):
+            raise KeyError(item_id)
+        self.list = [i for i in self.list if i["id"] != item_id]
+
+    async def close(self):
+        pass
+
+
+def test_shopping_api_for_both_passcodes(tmp_path):
+    fake = FakeShopping()
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x", None, "parents", home_shopping=fake)
+    run_client(hub, lambda client: _shopping_api(client, fake))
+
+
+async def _shopping_api(client, fake):
+    assert (await client.get("/api/shopping", headers={"Authorization": "Bearer nope"})).status == 401
+    family = (await (await client.post("/api/login", json={"passcode": "family"})).json())["token"]
+    parents = (await (await client.post("/api/school/login", json={"passcode": "parents"})).json())["token"]
+    for token in (family, parents):
+        body = await (await client.get("/api/shopping", headers={"Authorization": f"Bearer {token}"})).json()
+        assert body["list"] == "Family" and body["items"][0]["name"] == "Milk"
+    auth = {"Authorization": f"Bearer {family}"}
+    assert (await client.post("/api/shopping", json={"name": "  Eggs ", "note": " 12 "}, headers=auth)).status == 200
+    for bad in [{}, {"name": ""}, {"name": "  "}, {"name": 5}, {"name": "x" * 61}, {"name": "Eggs", "note": None},
+                {"name": "Eggs", "note": "x" * 81}]:
+        assert (await client.post("/api/shopping", json=bad, headers=auth)).status == 400, bad
+    assert fake.added == [("Eggs", "12")]
+    assert (await client.post("/api/shopping/u1/done", headers=auth)).status == 200
+    assert (await client.post("/api/shopping/u1/done", headers=auth)).status == 404
+    down = await client.post("/api/shopping/down/done", headers=auth)
+    assert down.status == 502 and (await down.json())["error"] == "Can't reach Bring! right now"
+
+
+def test_shopping_off_without_keys(tmp_path):
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x", None, "parents")
+    run_client(hub, _shopping_off)
+
+
+async def _shopping_off(client):
+    family = (await (await client.post("/api/login", json={"passcode": "family"})).json())["token"]
+    assert (await client.get("/api/shopping", headers={"Authorization": f"Bearer {family}"})).status == 503
+
+
+def test_pick_list_by_name_or_default():
+    from types import SimpleNamespace as L
+    lists = [L(listUuid="a", name="Mine"), L(listUuid="b", name="Family Shopping")]
+    assert shopping.pick_list(lists, "family shopping ", "a").listUuid == "b"
+    assert shopping.pick_list(lists, None, "a").listUuid == "a"
+    try:
+        shopping.pick_list(lists, "Groceries", "a")
+        raise AssertionError("expected ShoppingError")
+    except shopping.ShoppingError as e:
+        assert "Mine, Family Shopping" in str(e)
+
+
+def test_refused_sign_in_waits_before_retrying(tmp_path, monkeypatch):
+    import asyncio
+    import json as js
+
+    from bring_api.exceptions import BringAuthException
+    tries = []
+
+    class RefusingBring:
+        def __init__(self, session, mail, password):
+            pass
+
+        async def login(self):
+            tries.append(1)
+            raise BringAuthException("bad password")
+
+    keys = tmp_path / "bring.json"
+    keys.write_text(js.dumps({"email": "a@b.c", "password": "x"}))
+    monkeypatch.setattr(shopping, "Bring", RefusingBring)
+    now = [1000.0]
+    monkeypatch.setattr(shopping.time, "monotonic", lambda: now[0])
+    shop = shopping.Shopping(keys)
+
+    async def go():
+        for _ in range(3):
+            try:
+                await shop.items()
+                raise AssertionError("expected ShoppingError")
+            except shopping.ShoppingError as e:
+                assert "sign-in" in str(e)
+        assert len(tries) == 1
+        now[0] += shopping.SIGNIN_RETRY + 1
+        try:
+            await shop.items()
+        except shopping.ShoppingError:
+            pass
+        assert len(tries) == 2
+    asyncio.run(go())

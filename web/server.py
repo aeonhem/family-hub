@@ -36,6 +36,7 @@ import calendar_store as cs  # noqa: E402
 import fcm  # noqa: E402
 import lights  # noqa: E402
 import school_mail  # noqa: E402
+import shopping  # noqa: E402
 
 load_dotenv(HERE / ".env")  # local runs; on the server systemd passes /etc/familyhub-web.env
 load_dotenv(BOT_DIR / ".env")  # calendar id, timezone and token file, shared with the bot
@@ -215,6 +216,16 @@ def light_change(body: dict) -> dict:
     return {k: v for k, v in change.items() if v is not None}
 
 
+def shopping_item(body: dict) -> tuple[str, str]:
+    """A new shopping list item's name and note, checked."""
+    name, note = body.get("name"), body.get("note", "")
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > shopping.MAX_NAME:
+        raise web.HTTPBadRequest(text=f"name must be 1 to {shopping.MAX_NAME} characters")
+    if not isinstance(note, str) or len(note.strip()) > shopping.MAX_NOTE:
+        raise web.HTTPBadRequest(text=f"note must be up to {shopping.MAX_NOTE} characters")
+    return name.strip(), note.strip()
+
+
 def name_or_none(value) -> str | None:
     return value if value in FAMILY else None
 
@@ -339,7 +350,8 @@ def today() -> date:
 class Hub:
     def __init__(self, cal: cs.FamilyCalendar, store: Store, passcode: str, contact: str,
                  mailbox: school_mail.Mailbox | None = None, parent_passcode: str = "",
-                 phones_sender: fcm.Sender | None = None, home_lights: lights.Lights | None = None):
+                 phones_sender: fcm.Sender | None = None, home_lights: lights.Lights | None = None,
+                 home_shopping: shopping.Shopping | None = None):
         self.cal = cal
         self.store = store
         self.passcode = passcode
@@ -358,6 +370,8 @@ class Hub:
         self.phones: list[dict] = store.read("phones.json", [])
         # Smart Life lights, switched from the parents' phones.
         self.lights = home_lights
+        # The family's Bring! shopping list, for everyone.
+        self.shopping = home_shopping
         self.state: dict = store.read("state.json", {})
         self.weather_cache: dict | None = None
         self.weather_retry_at = 0.0
@@ -371,9 +385,9 @@ class Hub:
             given = request.headers.get("Authorization", "").removeprefix("Bearer ")
             # The Android app is only on the parents' phones, so it uses their passcode.
             parents_only = request.path.startswith(("/api/school", "/api/phone"))
-            # The lights are for everyone: Erlina's web app and the parents' Android app.
+            # The lights and shopping list are for everyone: Erlina's web app and the parents' Android app.
             need = [self.parent_token] if parents_only else [self.token]
-            if request.path.startswith("/api/lights"):
+            if request.path.startswith(("/api/lights", "/api/shopping")):
                 need = [self.token, self.parent_token]
             if not any(n and hmac.compare_digest(given.encode(), n.encode()) for n in need):
                 raise web.HTTPUnauthorized(text="Passcode needed")
@@ -448,6 +462,28 @@ class Hub:
             await self._lights_call("set", request.match_info["id"], **change)
         except KeyError:
             raise web.HTTPNotFound(text="No such light")
+        return web.json_response({"ok": True})
+
+    # --- Bring! shopping list ---
+
+    def _shop(self) -> shopping.Shopping:
+        if not self.shopping:
+            raise web.HTTPServiceUnavailable(text="Bring! isn't set up on the server yet.")
+        return self.shopping
+
+    async def shopping_list(self, request: web.Request) -> web.Response:
+        return web.json_response(await self._shop().items())
+
+    async def shopping_add(self, request: web.Request) -> web.Response:
+        name, note = shopping_item(await request.json())
+        await self._shop().add(name, note)
+        return web.json_response({"ok": True})
+
+    async def shopping_done(self, request: web.Request) -> web.Response:
+        try:
+            await self._shop().done(request.match_info["id"])
+        except KeyError:
+            raise web.HTTPNotFound(text="That's not on the list any more")
         return web.json_response({"ok": True})
 
     # --- reading ---
@@ -637,7 +673,7 @@ async def errors(request: web.Request, handler):
         raise
     except Exception as e:
         log.exception("%s %s failed", request.method, request.path)
-        if isinstance(e, lights.LightsError):
+        if isinstance(e, (lights.LightsError, shopping.ShoppingError)):
             return web.json_response({"error": str(e.args[0])}, status=502)
         where = "Gmail" if request.path.startswith("/api/school") else "the Family calendar"
         return web.json_response({"error": f"Couldn't reach {where} ({type(e).__name__})"}, status=502)
@@ -670,6 +706,9 @@ def make_app(hub: Hub) -> web.Application:
     app.router.add_post("/api/school/{id}/seen", hub.school_seen)
     app.router.add_get("/api/lights", hub.lights_list)
     app.router.add_post("/api/lights/{id}", hub.light_set)
+    app.router.add_get("/api/shopping", hub.shopping_list)
+    app.router.add_post("/api/shopping", hub.shopping_add)
+    app.router.add_post("/api/shopping/{id}/done", hub.shopping_done)
 
     async def index(request):
         return web.FileResponse(STATIC / "index.html")
@@ -682,6 +721,8 @@ def make_app(hub: Hub) -> web.Application:
     app.router.add_get("/sw.js", worker)
     app.router.add_static("/", STATIC)
     app.cleanup_ctx.append(hub.watch)
+    if hub.shopping:
+        app.on_cleanup.append(lambda _: hub.shopping.close())
     return app
 
 
@@ -703,6 +744,15 @@ def _home_lights() -> lights.Lights | None:
     return lights.Lights(keys)
 
 
+def _home_shopping() -> shopping.Shopping | None:
+    """Bring!, if the helper account's sign-in has been put on the server."""
+    keys = Path(os.getenv("BRING_KEYS", STATE_DIR / "bring.json"))
+    if not keys.exists():
+        log.info("no %s, so the shopping list is off", keys)
+        return None
+    return shopping.Shopping(keys)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     passcode = os.getenv("WEB_PASSCODE", "").strip()
@@ -710,7 +760,8 @@ def main() -> None:
         raise SystemExit("Set WEB_PASSCODE")
     host = os.getenv("WEB_HOST", "localhost")
     hub = Hub(_calendar(), Store(STATE_DIR), passcode, os.getenv("WEB_CONTACT") or f"https://{host}",
-              _mailbox(), os.getenv("PARENT_PASSCODE", "").strip(), _phones_sender(), _home_lights())
+              _mailbox(), os.getenv("PARENT_PASSCODE", "").strip(), _phones_sender(), _home_lights(),
+              _home_shopping())
     web.run_app(make_app(hub), host=os.getenv("WEB_BIND", "127.0.0.1"), port=int(os.getenv("WEB_PORT", "8080")))
 
 

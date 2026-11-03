@@ -398,7 +398,7 @@ private fun memoMeta(m: Item, withTo: Boolean = false): String {
 }
 
 @Composable
-private fun HubCard(content: @Composable ColumnScope.() -> Unit) {
+internal fun HubCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier.fillMaxWidth().background(Hub.Card, RoundedCornerShape(20.dp)).padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -452,7 +452,7 @@ private fun ChoreRow(c: Item, today: LocalDate, showDay: Boolean = false, onTogg
 }
 
 @Composable
-private fun Pill(label: String, selected: Boolean, onClick: () -> Unit) {
+internal fun Pill(label: String, selected: Boolean, onClick: () -> Unit) {
     if (selected) {
         Button(
             onClick = onClick, shape = RoundedCornerShape(18.dp),
