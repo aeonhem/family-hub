@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 
 import aiohttp
@@ -21,6 +22,9 @@ log = logging.getLogger("familyhub-web.shopping")
 MAX_NAME = 60  # Bring!'s own app cuts item names around here
 MAX_NOTE = 80
 RECENT = 12  # recently bought items shown for a one tap re-add
+# After a refused sign-in (wrong password, no such list), wait this long before
+# trying again, so phones refreshing every minute don't get the account locked.
+SIGNIN_RETRY = 5 * 60
 
 
 class ShoppingError(Exception):
@@ -52,11 +56,14 @@ class Shopping:
         self.list_uuid = ""
         self.title = ""
         self.lock = asyncio.Lock()
+        self.refused: tuple[float, Exception] | None = None  # (when, why) the last sign-in was refused
 
     async def _ready(self) -> Bring:
         """Signs in on first use. bring-api renews the token by itself after that."""
         async with self.lock:
             if not self.bring:
+                if self.refused and time.monotonic() - self.refused[0] < SIGNIN_RETRY:
+                    raise self.refused[1]
                 session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
                 bring = Bring(session, self.email, self.password)
                 try:
@@ -64,8 +71,10 @@ class Shopping:
                     chosen = pick_list((await bring.load_lists()).lists, self.list_name, auth.bringListUUID)
                     if not chosen:
                         raise ShoppingError("The Bring! account has no lists. Invite it to the family list.")
-                except BaseException:
+                except BaseException as e:
                     await session.close()
+                    if isinstance(e, (BringAuthException, ShoppingError)):
+                        self.refused = (time.monotonic(), e)
                     raise
                 self.session, self.bring = session, bring
                 self.list_uuid, self.title = chosen.listUuid, chosen.name

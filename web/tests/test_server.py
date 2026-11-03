@@ -513,3 +513,42 @@ def test_pick_list_by_name_or_default():
         raise AssertionError("expected ShoppingError")
     except shopping.ShoppingError as e:
         assert "Mine, Family Shopping" in str(e)
+
+
+def test_refused_sign_in_waits_before_retrying(tmp_path, monkeypatch):
+    import asyncio
+    import json as js
+
+    from bring_api.exceptions import BringAuthException
+    tries = []
+
+    class RefusingBring:
+        def __init__(self, session, mail, password):
+            pass
+
+        async def login(self):
+            tries.append(1)
+            raise BringAuthException("bad password")
+
+    keys = tmp_path / "bring.json"
+    keys.write_text(js.dumps({"email": "a@b.c", "password": "x"}))
+    monkeypatch.setattr(shopping, "Bring", RefusingBring)
+    now = [1000.0]
+    monkeypatch.setattr(shopping.time, "monotonic", lambda: now[0])
+    shop = shopping.Shopping(keys)
+
+    async def go():
+        for _ in range(3):
+            try:
+                await shop.items()
+                raise AssertionError("expected ShoppingError")
+            except shopping.ShoppingError as e:
+                assert "sign-in" in str(e)
+        assert len(tries) == 1
+        now[0] += shopping.SIGNIN_RETRY + 1
+        try:
+            await shop.items()
+        except shopping.ShoppingError:
+            pass
+        assert len(tries) == 2
+    asyncio.run(go())
