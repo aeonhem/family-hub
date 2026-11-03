@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.TaskAlt
@@ -58,11 +59,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-private enum class Tab(val label: String, val heading: String, val icon: ImageVector) {
+private enum class Tab(val label: String, val heading: String, val icon: ImageVector, val parentsOnly: Boolean = false) {
     TODAY("Today", "Today", Icons.Outlined.Today),
     DINNER("Dinner", "Dinner this week", Icons.Outlined.Restaurant),
     CHORES("Chores", "Chores", Icons.Outlined.TaskAlt),
     MEMOS("Memos", "Memos", Icons.Outlined.Campaign),
+    LIGHTS("Lights", "Lights", Icons.Outlined.Lightbulb, parentsOnly = true),
 }
 
 @Composable
@@ -99,6 +101,9 @@ fun FamilyHubApp(vm: HubViewModel, onRequestPermission: () -> Unit) {
 @Composable
 private fun MainScaffold(vm: HubViewModel, s: HubState) {
     var tab by rememberSaveable { mutableStateOf(Tab.TODAY) }
+    val parent = s.me == "Julian" || s.me == "Sally"
+    val tabs = Tab.entries.filter { parent || !it.parentsOnly }
+    if (tab !in tabs) tab = Tab.TODAY
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     if (settingsOpen) SettingsDialog(vm, onDismiss = { settingsOpen = false })
     val snackbar = remember { SnackbarHostState() }
@@ -110,7 +115,7 @@ private fun MainScaffold(vm: HubViewModel, s: HubState) {
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             NavigationBar(containerColor = Hub.Card) {
-                Tab.entries.forEach { t ->
+                tabs.forEach { t ->
                     NavigationBarItem(
                         selected = tab == t,
                         onClick = { tab = t },
@@ -160,6 +165,7 @@ private fun MainScaffold(vm: HubViewModel, s: HubState) {
                 Tab.DINNER -> item { DinnerScreen(s, vm) }
                 Tab.CHORES -> item { ChoresScreen(s, vm) }
                 Tab.MEMOS -> item { MemosScreen(s, vm) }
+                Tab.LIGHTS -> item { LightsScreen() }
             }
         }
     }

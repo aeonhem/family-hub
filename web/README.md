@@ -102,3 +102,51 @@ Set up once:
    delete the copy.
 4. Each phone registers itself once its person is picked and the parents'
    passcode has been entered in the school emails card.
+
+## Smart Life lights (parents only)
+
+The Android app's **Lights** tab, on Julian's and Sally's phones, switches and
+dims the lights added in the Smart Life app. The server talks to Tuya's cloud
+(the platform behind Smart Life) with a free Tuya IoT project linked to the
+Smart Life account, and the phones only talk to the server. It uses the
+parents' passcode, like the school emails.
+
+Set up once:
+
+1. At https://platform.tuya.com, sign up (free) and go to **Cloud >
+   Development > Create Cloud Project**. Industry *Smart Home*, development
+   method *Smart Home*, and the **data centre where the Smart Life account
+   lives**. If you're not sure, add more than one; the link in step 3 only
+   finds devices in the right one.
+2. On the API services page, keep **IoT Core** and **Authorization Token
+   Management** (both free).
+3. In the project, **Devices > Link App Account > Add App Account**, and scan
+   the QR code with the Smart Life app (Me > the scan icon, top right). The
+   lights appear under **All Devices**. Copy the **UID** shown for the linked
+   account.
+4. From **Overview**, copy the **Access ID** and **Access Secret**, and make
+   `tuya.json` (keep it private, it's in .gitignore):
+
+   ```json
+   {
+     "endpoint": "https://openapi.tuyaus.com",
+     "access_id": "...",
+     "access_secret": "...",
+     "uid": "..."
+   }
+   ```
+
+   `endpoint` goes with the data centre: Western America
+   `https://openapi.tuyaus.com`, Eastern America `https://openapi-ueaz.tuyaus.com`,
+   Central Europe `https://openapi.tuyaeu.com`, Western Europe
+   `https://openapi-weaz.tuyaeu.com`, India `https://openapi.tuyain.com`,
+   China `https://openapi.tuyacn.com`.
+5. Try it from the PC first: `python web/lights.py tuya.json` lists the
+   lights, and `python web/lights.py tuya.json "bedroom lamp" off` switches
+   one.
+6. Put it on the server: `bash deploy_server.sh tuya.json` from the PC (or
+   copy it there and run `sudo bash web/deploy/setup.sh --tuya tuya.json`),
+   then delete any copy on the server.
+
+New lights added in Smart Life show up in the tab by themselves. Bulbs and
+strips get a brightness slider; plugs and switches get on/off.

@@ -75,7 +75,10 @@ data class SchoolState(
 class SchoolViewModel(app: Application) : AndroidViewModel(app) {
     private val client = SchoolMailClient()
     private val prefs = app.getSharedPreferences("familyhub", Context.MODE_PRIVATE)
-    private var token: String? = prefs.getString("schoolToken", null)
+    // Read fresh each time: the Lights tab can enter the same passcode.
+    private var token: String?
+        get() = prefs.getString("schoolToken", null)
+        set(value) = prefs.edit().putString("schoolToken", value).apply()
 
     private val _state = MutableStateFlow(SchoolState(linked = token != null))
     val state: StateFlow<SchoolState> = _state
@@ -83,7 +86,7 @@ class SchoolViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         val t = token ?: return
         viewModelScope.launch {
-            _state.update { it.copy(loading = true) }
+            _state.update { it.copy(linked = true, loading = true) }
             val result = withContext(Dispatchers.IO) { runCatching { client.inbox(t) } }
             result.onSuccess { inbox ->
                 _state.update { it.copy(loading = false, new = inbox.new, seen = inbox.seen, error = null) }
@@ -97,7 +100,6 @@ class SchoolViewModel(app: Application) : AndroidViewModel(app) {
             val result = withContext(Dispatchers.IO) { runCatching { client.login(passcode.trim()) } }
             result.onSuccess { t ->
                 token = t
-                prefs.edit().putString("schoolToken", t).apply()
                 // The same passcode turns on memo push for this phone.
                 MemoPush.register(getApplication<Application>())
                 _state.update { it.copy(linked = true) }
@@ -121,10 +123,7 @@ class SchoolViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun failed(e: Throwable) {
-        if (e is NeedsPasscode) {
-            token = null
-            prefs.edit().remove("schoolToken").apply()
-        }
+        if (e is NeedsPasscode) token = null
         _state.update {
             it.copy(loading = false, linked = token != null, error = e.message ?: "Couldn't load school emails")
         }

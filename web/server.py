@@ -34,6 +34,7 @@ BOT_DIR = Path(os.getenv("BOT_DIR", HERE.parent / "bot"))
 sys.path.insert(0, str(BOT_DIR))
 import calendar_store as cs  # noqa: E402
 import fcm  # noqa: E402
+import lights  # noqa: E402
 import school_mail  # noqa: E402
 
 load_dotenv(HERE / ".env")  # local runs; on the server systemd passes /etc/familyhub-web.env
@@ -188,6 +189,32 @@ def weather_json(data: dict, fetched_at: float) -> dict:
     }
 
 
+def light_change(body: dict) -> dict:
+    """The parts of a Lights tab change the server accepts, checked. One of
+    colour, white (temp) or scene at a time; on and brightness can go with any."""
+    def whole(key, lo, hi):
+        v = body.get(key)
+        if v is None:
+            return None
+        if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+            raise web.HTTPBadRequest(text=f"{key} must be {lo} to {hi}")
+        return v
+
+    on = body.get("on")
+    if on is not None and not isinstance(on, bool):
+        raise web.HTTPBadRequest(text="on must be true or false")
+    change = {"on": on, "brightness": whole("brightness", 1, 100), "temp": whole("temp", 0, 100)}
+    color, scene = body.get("color"), body.get("scene")
+    if color is not None and not lights.valid_hex(color):
+        raise web.HTTPBadRequest(text="color must look like #ff8800")
+    if scene is not None and scene not in lights.SCENES:
+        raise web.HTTPBadRequest(text="No such scene")
+    change.update(color=color, scene=scene)
+    if sum(v is not None for v in (color, scene, change["temp"])) > 1:
+        raise web.HTTPBadRequest(text="Pick one of color, temp or scene")
+    return {k: v for k, v in change.items() if v is not None}
+
+
 def name_or_none(value) -> str | None:
     return value if value in FAMILY else None
 
@@ -312,7 +339,7 @@ def today() -> date:
 class Hub:
     def __init__(self, cal: cs.FamilyCalendar, store: Store, passcode: str, contact: str,
                  mailbox: school_mail.Mailbox | None = None, parent_passcode: str = "",
-                 phones_sender: fcm.Sender | None = None):
+                 phones_sender: fcm.Sender | None = None, home_lights: lights.Lights | None = None):
         self.cal = cal
         self.store = store
         self.passcode = passcode
@@ -329,6 +356,8 @@ class Hub:
         # Android phones (Julian's and Sally's) for memo alerts through FCM.
         self.fcm = phones_sender
         self.phones: list[dict] = store.read("phones.json", [])
+        # Smart Life lights, switched from the parents' phones.
+        self.lights = home_lights
         self.state: dict = store.read("state.json", {})
         self.weather_cache: dict | None = None
         self.weather_retry_at = 0.0
@@ -342,8 +371,11 @@ class Hub:
             given = request.headers.get("Authorization", "").removeprefix("Bearer ")
             # The Android app is only on the parents' phones, so it uses their passcode.
             parents_only = request.path.startswith(("/api/school", "/api/phone"))
-            need = self.parent_token if parents_only else self.token
-            if not need or not hmac.compare_digest(given.encode(), need.encode()):
+            # The lights are for everyone: Erlina's web app and the parents' Android app.
+            need = [self.parent_token] if parents_only else [self.token]
+            if request.path.startswith("/api/lights"):
+                need = [self.token, self.parent_token]
+            if not any(n and hmac.compare_digest(given.encode(), n.encode()) for n in need):
                 raise web.HTTPUnauthorized(text="Passcode needed")
         return await handler(request)
 
@@ -393,6 +425,29 @@ class Hub:
         cutoff = (today() - timedelta(days=SCHOOL_SEEN_DAYS + 7)).isoformat()
         self.state["school_seen"] = {k: v for k, v in seen.items() if v >= cutoff}
         self.store.write("state.json", self.state)
+        return web.json_response({"ok": True})
+
+    # --- Smart Life lights ---
+
+    async def _lights_call(self, method: str, *args, **kwargs):
+        if not self.lights:
+            raise web.HTTPServiceUnavailable(text="Smart Life isn't set up on the server yet.")
+        fn = functools.partial(getattr(self.lights, method), *args, **kwargs)
+        return await asyncio.get_running_loop().run_in_executor(_push, fn)
+
+    async def lights_list(self, request: web.Request) -> web.Response:
+        found = await self._lights_call("list")
+        return web.json_response({
+            "lights": [lights.public(j) for j in found],
+            "scenes": [{"id": k, "label": label} for k, (label, _) in lights.SCENES.items()],
+        })
+
+    async def light_set(self, request: web.Request) -> web.Response:
+        change = light_change(await request.json())
+        try:
+            await self._lights_call("set", request.match_info["id"], **change)
+        except KeyError:
+            raise web.HTTPNotFound(text="No such light")
         return web.json_response({"ok": True})
 
     # --- reading ---
@@ -582,6 +637,8 @@ async def errors(request: web.Request, handler):
         raise
     except Exception as e:
         log.exception("%s %s failed", request.method, request.path)
+        if isinstance(e, lights.LightsError):
+            return web.json_response({"error": str(e.args[0])}, status=502)
         where = "Gmail" if request.path.startswith("/api/school") else "the Family calendar"
         return web.json_response({"error": f"Couldn't reach {where} ({type(e).__name__})"}, status=502)
     if isinstance(resp, web.FileResponse) or request.path == "/":
@@ -611,6 +668,8 @@ def make_app(hub: Hub) -> web.Application:
     app.router.add_post("/api/school/login", hub.school_login)
     app.router.add_get("/api/school", hub.school)
     app.router.add_post("/api/school/{id}/seen", hub.school_seen)
+    app.router.add_get("/api/lights", hub.lights_list)
+    app.router.add_post("/api/lights/{id}", hub.light_set)
 
     async def index(request):
         return web.FileResponse(STATIC / "index.html")
@@ -635,6 +694,15 @@ def _phones_sender() -> fcm.Sender | None:
     return fcm.Sender(key)
 
 
+def _home_lights() -> lights.Lights | None:
+    """Smart Life, if the Tuya project's keys have been put on the server."""
+    keys = Path(os.getenv("TUYA_KEYS", STATE_DIR / "tuya.json"))
+    if not keys.exists():
+        log.info("no %s, so lights are off", keys)
+        return None
+    return lights.Lights(keys)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     passcode = os.getenv("WEB_PASSCODE", "").strip()
@@ -642,7 +710,7 @@ def main() -> None:
         raise SystemExit("Set WEB_PASSCODE")
     host = os.getenv("WEB_HOST", "localhost")
     hub = Hub(_calendar(), Store(STATE_DIR), passcode, os.getenv("WEB_CONTACT") or f"https://{host}",
-              _mailbox(), os.getenv("PARENT_PASSCODE", "").strip(), _phones_sender())
+              _mailbox(), os.getenv("PARENT_PASSCODE", "").strip(), _phones_sender(), _home_lights())
     web.run_app(make_app(hub), host=os.getenv("WEB_BIND", "127.0.0.1"), port=int(os.getenv("WEB_PORT", "8080")))
 
 
