@@ -418,3 +418,23 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
   z-index: 20;
 }
 #snackbar.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- Lights ---------- */
+.light-head { display: flex; align-items: center; gap: 12px; }
+.light-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bulb { width: 40px; height: 40px; flex: none; border-radius: 20px; display: grid; place-items: center; background: var(--track); color: var(--muted); }
+.bulb svg { width: 24px; height: 24px; fill: currentColor; }
+.light.lit .bulb { background: var(--orange-soft); color: var(--orange-ink); }
+.light.lit .bulb[data-swatch] { color: #fff; }
+.toggle { width: 52px; height: 32px; flex: none; border-radius: 16px; background: var(--track); border: 2px solid var(--line); position: relative; transition: background 0.15s; }
+.toggle i { position: absolute; top: 5px; left: 6px; width: 18px; height: 18px; border-radius: 9px; background: var(--line); transition: left 0.15s, background 0.15s; }
+.toggle[aria-checked="true"] { background: var(--teal); border-color: var(--teal); }
+.toggle[aria-checked="true"] i { left: 26px; background: #fff; }
+.toggle:disabled { opacity: 0.4; cursor: default; }
+.dim { width: 100%; accent-color: var(--teal); min-height: 32px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.swatch-btn { width: 36px; height: 36px; border-radius: 18px; border: 1px solid var(--line); position: relative; overflow: hidden; }
+.swatch-btn[aria-pressed="true"] { outline: 3px solid var(--teal); outline-offset: 2px; }
+.swatch-btn.custom { background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); cursor: pointer; }
+.swatch-btn.custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
+.swatch-btn:focus-visible, .toggle:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }

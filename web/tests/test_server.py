@@ -287,3 +287,155 @@ async def _phone_api(client, tmp_path):
     assert (await client.post("/api/phone/register", json={"person": "Bob", "token": "x"}, headers=auth)).status == 400
     await client.post("/api/phone/unregister", json={"token": "abc"}, headers=auth)
     assert server.Store(tmp_path).read("phones.json", []) == []
+
+
+# ---------- Smart Life lights ----------
+
+import lights  # noqa: E402
+
+# The bedroom lamp as Tuya reported it on 2026-11-03 (a Genio 9W bulb), trimmed.
+LAMP = {"id": "d1", "name": "Bedroom lamp", "online": True, "status": [
+    {"code": "switch_led", "value": True}, {"code": "work_mode", "value": "white"},
+    {"code": "bright_value_v2", "value": 1000}, {"code": "temp_value_v2", "value": 465},
+    {"code": "colour_data_v2", "value": '{"h":0,"s":1000,"v":1000}'},
+    {"code": "scene_data_v2", "value": '{"scene_num":1,"scene_units":[]}'}]}
+
+
+def lamp(**status):
+    d = {**LAMP, "status": [dict(s) for s in LAMP["status"]]}
+    for s in d["status"]:
+        if s["code"] in status:
+            s["value"] = status[s["code"]]
+    return lights.light_json(d)
+
+
+def test_string_to_sign_hashes_body_and_sorts_query():
+    s = lights.string_to_sign("GET", "/v1.0/token", {"grant_type": 1, "a": "b"}, b"")
+    assert s == "GET\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n\n/v1.0/token?a=b&grant_type=1"
+    assert lights.string_to_sign("POST", "/x", None, b"{}").endswith("\n\n/x")
+
+
+def test_sign_is_upper_hex_and_uses_the_token():
+    a = lights.sign("id", "secret", "", "1700000000000", "n", "GET\nh\n\n/v1.0/token")
+    assert a == a.upper() and len(a) == 64
+    assert a != lights.sign("id", "secret", "tok", "1700000000000", "n", "GET\nh\n\n/v1.0/token")
+
+
+def test_brightness_percent_round_trip():
+    assert lights.to_percent(10, "bright_value_v2") == 1 and lights.to_percent(1000, "bright_value_v2") == 100
+    assert lights.from_percent(100, "bright_value") == 255 and lights.from_percent(1, "bright_value") == 25
+    for p in (1, 37, 50, 100):
+        assert lights.to_percent(lights.from_percent(p, "bright_value_v2"), "bright_value_v2") == p
+
+
+def test_colour_conversions():
+    assert lights.hex_to_hs("#ff0000") == (0, 1000)
+    assert lights.hex_to_hs("#0000ff") == (240, 1000)
+    assert lights.hs_to_hex(120, 1000) == "#00ff00"
+    assert lights.valid_hex("#Ff8800") and not lights.valid_hex("ff8800") and not lights.valid_hex("#ff880")
+
+
+def test_light_json_reads_mode_colour_and_scene():
+    j = lamp()
+    assert lights.public(j) == {"id": "d1", "name": "Bedroom lamp", "online": True, "on": True, "brightness": 100,
+                                "mode": "white", "color": "#ff0000", "temp": 46, "scene": None,
+                                "can": {"color": True, "temp": True, "scenes": True}}
+    # In colour mode the brightness is the colour's own level.
+    c = lamp(work_mode="colour", colour_data_v2='{"h":240,"s":1000,"v":505}')
+    assert c["brightness"] == 50 and c["color"] == "#0000ff"
+    assert lamp(work_mode="scene")["scene"] == "night"
+    plug = lights.light_json({"id": "p", "name": "Fan", "status": [{"code": "switch_1", "value": False}]})
+    assert plug["on"] is False and plug["brightness"] is None and plug["can"] == {"color": False, "temp": False, "scenes": False}
+    assert lights.light_json({"id": "s", "status": [{"code": "temp_current", "value": 22}]}) is None
+
+
+def test_commands_follow_the_mode():
+    white = lamp()
+    assert lights.commands_for(white, on=False) == [{"code": "switch_led", "value": False}]
+    assert lights.commands_for(white, brightness=1) == [{"code": "bright_value_v2", "value": 10}]
+    assert lights.commands_for(white, temp=100) == [{"code": "work_mode", "value": "white"},
+                                                   {"code": "temp_value_v2", "value": 1000}]
+    colour = lights.commands_for(white, color="#0000ff")
+    assert colour == [{"code": "work_mode", "value": "colour"},
+                      {"code": "colour_data_v2", "value": {"h": 240, "s": 1000, "v": 1000}}]
+    # Dimming a colour changes the colour's level, not the white brightness.
+    blue = lamp(work_mode="colour", colour_data_v2='{"h":240,"s":1000,"v":1000}')
+    assert lights.commands_for(blue, brightness=1) == [{"code": "colour_data_v2", "value": {"h": 240, "s": 1000, "v": 10}}]
+    scene = lights.commands_for(white, scene="rainbow")
+    assert scene[0] == {"code": "work_mode", "value": "scene"} and scene[1]["value"]["scene_num"] == 6
+    # Dimming during a scene goes back to white.
+    assert lights.commands_for(lamp(work_mode="scene"), brightness=100)[0] == {"code": "work_mode", "value": "white"}
+
+
+def test_scenes_fit_the_bulbs_ranges():
+    for label, data in lights.SCENES.values():
+        assert 1 <= data["scene_num"] <= 8 and data["scene_units"], label
+        for u in data["scene_units"]:
+            assert 0 <= u["h"] <= 360 and all(0 <= u[k] <= 1000 for k in ("s", "v", "bright", "temperature")), label
+            assert 0 <= u["unit_gradient_duration"] <= 100 and u["unit_change_mode"] in ("static", "jump", "gradient")
+
+
+class FakeLights:
+    def __init__(self):
+        self.sent = []
+
+    def list(self):
+        return [lamp()]
+
+    def set(self, device_id, **change):
+        if device_id != "d1":
+            raise KeyError(device_id)
+        self.sent.append((device_id, change))
+
+
+def test_lights_api_for_both_passcodes(tmp_path):
+    fake = FakeLights()
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x", None, "parents", None, fake)
+    run_client(hub, lambda client: _lights_api(client, fake))
+
+
+async def _lights_api(client, fake):
+    assert (await client.get("/api/lights", headers={"Authorization": "Bearer nope"})).status == 401
+    family = (await (await client.post("/api/login", json={"passcode": "family"})).json())["token"]
+    parents = (await (await client.post("/api/school/login", json={"passcode": "parents"})).json())["token"]
+    for token in (family, parents):
+        body = await (await client.get("/api/lights", headers={"Authorization": f"Bearer {token}"})).json()
+        # The device's Tuya codes stay on the server.
+        assert [set(j) for j in body["lights"]] == [set(lights.public(lamp()))]
+        assert [s["id"] for s in body["scenes"]] == list(lights.SCENES)
+    auth = {"Authorization": f"Bearer {family}"}
+    ok = [{"on": True}, {"brightness": 70}, {"color": "#ff8800", "brightness": 40}, {"temp": 0}, {"scene": "ocean"}]
+    for b in ok:
+        assert (await client.post("/api/lights/d1", json=b, headers=auth)).status == 200, b
+    bad = [{"on": "yes"}, {"brightness": 0}, {"brightness": True}, {"temp": 101}, {"color": "red"},
+           {"scene": "disco"}, {"color": "#ff8800", "scene": "ocean"}]
+    for b in bad:
+        assert (await client.post("/api/lights/d1", json=b, headers=auth)).status == 400, b
+    assert (await client.post("/api/lights/nope", json={"on": True}, headers=auth)).status == 404
+    assert fake.sent == [("d1", b) for b in ok]
+
+
+def test_lights_off_without_keys(tmp_path):
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x", None, "parents")
+    run_client(hub, _lights_off)
+
+
+async def _lights_off(client):
+    parents = (await (await client.post("/api/school/login", json={"passcode": "parents"})).json())["token"]
+    assert (await client.get("/api/lights", headers={"Authorization": f"Bearer {parents}"})).status == 503
+
+
+def test_query_is_signed_unencoded():
+    # Tuya rejects a signature over "codes=a%2Cb"; it signs the query as written.
+    assert lights.string_to_sign("GET", "/x", {"codes": "a,b"}, b"").endswith("\n\n/x?codes=a,b")
+
+
+def test_sent_state_shows_until_the_device_reports():
+    stale = {**LAMP, "update_time": 1000}
+    sent = (2000.0, {"work_mode": "colour", "colour_data_v2": {"h": 240, "s": 1000, "v": 1000}, "switch_led": False})
+    j = lights.light_json(lights.with_sent(stale, sent))
+    assert j["mode"] == "colour" and j["color"] == "#0000ff" and j["on"] is False
+    # Once the bulb reports after the command, its own state wins.
+    fresh = {**LAMP, "update_time": 3000}
+    assert lights.light_json(lights.with_sent(fresh, sent))["mode"] == "white"
+    assert lights.with_sent(stale, None) is stale
