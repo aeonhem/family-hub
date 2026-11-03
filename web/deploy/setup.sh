@@ -46,6 +46,11 @@ case "${1:-}" in
     systemctl restart familyhub-web
     echo "Parents passcode set."
     exit 0 ;;
+  --*)
+    # An unknown option (e.g. one an older copy of this script lacks) must not
+    # be saved as the family passcode.
+    echo "Unknown option $1. A passcode can't start with --."
+    exit 1 ;;
 esac
 
 if [ -n "${1:-}" ] || [ ! -f "$ENV" ]; then
