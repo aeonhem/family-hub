@@ -122,6 +122,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
             Instances.END,
             Instances.RRULE,
             Instances.RDATE,
+            Instances.DTSTART,
         )
         val out = mutableListOf<Item>()
         resolver.query(
@@ -140,12 +141,14 @@ class CalendarRepository(private val resolver: ContentResolver) {
                 else LocalDateTime.ofInstant(Instant.ofEpochMilli(endMs - 1), zone).toLocalDate()
                 val endDate = if (lastDay < date) date else lastDay
                 if (endDate < from || date > to) continue
-                val recurring = !c.getString(6).isNullOrBlank() || !c.getString(7).isNullOrBlank()
+                val rrule = c.getString(6)?.takeIf { it.isNotBlank() }
+                val recurring = rrule != null || !c.getString(7).isNullOrBlank()
                 val (kind, done, title) = Item.parseTitle(c.getString(1) ?: "")
                 val (meta, note) = Item.parseDescription(c.getString(2))
                 out += Item(
                     c.getLong(0), kind, title, date, start, allDay, done, meta, note,
                     begin = beginMs, end = endMs, endDate = endDate, recurring = recurring,
+                    rrule = rrule, seriesStart = if (c.isNull(8)) beginMs else c.getLong(8),
                 )
             }
         }
@@ -180,12 +183,44 @@ class CalendarRepository(private val resolver: ContentResolver) {
         requestSync(cal)
     }
 
-    fun addChore(cal: CalendarInfo, date: LocalDate, title: String, forWho: String?, from: String?) {
+    /** A chore on [date]; with [everyDays] it repeats until someone stops it. */
+    fun addChore(cal: CalendarInfo, date: LocalDate, title: String, forWho: String?, from: String?, everyDays: Int? = null) {
         val start = date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
         insertEvent(
             cal, "${Item.CHORE_OPEN} $title", Item.buildDescription(mapOf("for" to forWho, "from" to from)),
             start, start + 24 * 60 * 60_000L, allDay = true,
+            rrule = everyDays?.let { Item.repeatRule(it) },
         )
+    }
+
+    /**
+     * Stops a repeating chore after [today]: today's one stays (so a tick
+     * already made still counts), later ones go. A series that hasn't
+     * started yet is deleted outright.
+     */
+    fun stopRepeating(cal: CalendarInfo, item: Item, today: LocalDate) {
+        val uri = ContentUris.withAppendedId(Events.CONTENT_URI, item.eventId)
+        val firstDay = Instant.ofEpochMilli(item.seriesStart).atZone(ZoneOffset.UTC).toLocalDate()
+        if (firstDay > today) {
+            resolver.delete(uri, null, null)
+        } else {
+            val rule = item.rrule ?: return
+            // Send the series' own times with the new rule so the phone's
+            // calendar recalculates which days it covers.
+            val values = ContentValues()
+            resolver.query(uri, arrayOf(Events.DTSTART, Events.DURATION, Events.ALL_DAY, Events.EVENT_TIMEZONE), null, null, null)
+                ?.use { c ->
+                    if (c.moveToFirst()) {
+                        values.put(Events.DTSTART, c.getLong(0))
+                        c.getString(1)?.let { values.put(Events.DURATION, it) }
+                        values.put(Events.ALL_DAY, c.getInt(2))
+                        c.getString(3)?.let { values.put(Events.EVENT_TIMEZONE, it) }
+                    }
+                }
+            values.put(Events.RRULE, Item.endRuleOn(rule, today))
+            resolver.update(uri, values, null, null)
+        }
+        requestSync(cal)
     }
 
     fun setChoreDone(cal: CalendarInfo, item: Item, done: Boolean, by: String?) {
@@ -227,14 +262,20 @@ class CalendarRepository(private val resolver: ContentResolver) {
 
     private fun insertEvent(
         cal: CalendarInfo, title: String, description: String,
-        start: Long, end: Long, allDay: Boolean,
+        start: Long, end: Long, allDay: Boolean, rrule: String? = null,
     ): Long? {
         val values = ContentValues().apply {
             put(Events.CALENDAR_ID, cal.id)
             put(Events.TITLE, title)
             put(Events.DESCRIPTION, description)
             put(Events.DTSTART, start)
-            put(Events.DTEND, end)
+            if (rrule == null) {
+                put(Events.DTEND, end)
+            } else {
+                // Repeating events have a length instead of an end time.
+                put(Events.RRULE, rrule)
+                put(Events.DURATION, if (allDay) "P${(end - start) / 86_400_000L}D" else "P${(end - start) / 1000}S")
+            }
             put(Events.ALL_DAY, if (allDay) 1 else 0)
             put(Events.EVENT_TIMEZONE, if (allDay) "UTC" else zone.id)
         }

@@ -47,14 +47,15 @@ def test_week_count_is_chores_she_ticked():
     assert bot.ticked_this_week(items, D) == 1
 
 
-def test_kid_chores_today_and_overdue():
+def test_kid_chores_are_today_only():
     items = [
         item("chore", "Today"),
+        item("chore", "Ticked", done=True),
         item("chore", "Late", day=D - timedelta(days=2)),
         item("chore", "Done late", day=D - timedelta(days=2), done=True),
         item("chore", "Sally's", **{"for": "Sally"}),
     ]
-    assert [c.title for c in bot.kid_chores(items, D)] == ["Late", "Today"]
+    assert [c.title for c in bot.kid_chores(items, D)] == ["Today", "Ticked"]
 
 
 def test_long_memo_is_clipped():

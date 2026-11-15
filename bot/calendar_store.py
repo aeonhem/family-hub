@@ -32,6 +32,7 @@ class Item:
     note: str = ""
     end_day: date | None = None  # last day it covers; None means just [day]
     end: datetime | None = None  # None for all-day events
+    repeats: bool = False  # one day of a repeating event
 
     def covers(self, d: date) -> bool:
         """True when the event is on [d], including the middle of a multi-day event."""
@@ -57,6 +58,16 @@ class Item:
         """True when addressed to [name], to everyone, or to nobody in particular."""
         who = (self.for_who or "").strip().lower()
         return who in EVERYONE or who == name.lower()
+
+
+def is_missed(item: Item, today: date) -> bool:
+    """An open chore whose day has passed. These vanish at midnight: they're
+    never marked done, so they never count towards anyone's ticked chores."""
+    return item.kind == "chore" and not item.done and (item.end_day or item.day) < today
+
+
+def visible_chore(item: Item, today: date) -> bool:
+    return item.kind == "chore" and not is_missed(item, today)
 
 
 def parse_title(raw: str) -> tuple[str, bool, str]:
@@ -107,7 +118,8 @@ def parse_event(ev: dict, tz: ZoneInfo) -> Item:
         day, start_dt = date.fromisoformat(start["date"]), None
         # All-day end dates are exclusive.
         end_day = date.fromisoformat(end["date"]) - timedelta(days=1) if "date" in end else day
-    return Item(ev["id"], kind, title, day, start_dt, done, meta, note, max(end_day, day), end_dt)
+    return Item(ev["id"], kind, title, day, start_dt, done, meta, note, max(end_day, day), end_dt,
+                bool(ev.get("recurringEventId")))
 
 
 def _local(stamp: str, tz: ZoneInfo) -> datetime:
@@ -198,6 +210,17 @@ class FamilyCalendar:
         else:
             events.insert(calendarId=self.calendar_id, body=body).execute()
 
+    def clear_missed_chores(self, today: date, look_back: int = 14) -> int:
+        """Deletes open chores from before [today]. For a repeating chore only
+        that day's occurrence goes; the rest of the series stays."""
+        missed = [i for i in self.items(today - timedelta(days=look_back), today - timedelta(days=1))
+                  if is_missed(i, today)]
+        for i in missed:
+            self.service.events().delete(calendarId=self.calendar_id, eventId=i.event_id).execute()
+        return len(missed)
+
     def get(self, event_id: str) -> Item:
         ev = self.service.events().get(calendarId=self.calendar_id, eventId=event_id).execute()
+        if ev.get("status") == "cancelled":
+            raise LookupError("That chore has been cleared")
         return parse_event(ev, self.tz)

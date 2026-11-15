@@ -60,4 +60,27 @@ class ItemTest {
         val b = a.copy(date = day.plusDays(7), begin = 2L)
         assertTrue(a.key != b.key)
     }
+
+    @Test
+    fun missedChoresAreOpenOnesFromEarlierDays() {
+        val today = LocalDate.of(2026, 11, 15)
+        val open = Item(1, Kind.CHORE, "Dishes", today.minusDays(1), null, true, false, emptyMap(), "")
+        assertTrue(open.missed(today))
+        assertFalse(open.copy(done = true).missed(today))
+        assertFalse(open.copy(date = today, endDate = today).missed(today))
+    }
+
+    @Test
+    fun repeatRules() {
+        assertEquals("FREQ=DAILY", Item.repeatRule(1))
+        assertEquals("FREQ=DAILY;INTERVAL=2", Item.repeatRule(2))
+        assertEquals("FREQ=WEEKLY", Item.repeatRule(7))
+        assertEquals("every 2 days", Item.repeatLabel("FREQ=DAILY;INTERVAL=2"))
+        assertEquals("every day", Item.repeatLabel("FREQ=DAILY"))
+        assertEquals("every week", Item.repeatLabel("FREQ=WEEKLY;WKST=MO"))
+        assertEquals(
+            "FREQ=DAILY;INTERVAL=2;UNTIL=20261115",
+            Item.endRuleOn("FREQ=DAILY;COUNT=10;INTERVAL=2", LocalDate.of(2026, 11, 15)),
+        )
+    }
 }

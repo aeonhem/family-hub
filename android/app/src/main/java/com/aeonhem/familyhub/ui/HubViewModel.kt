@@ -179,8 +179,10 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
         write { repo.setChoreDone(it, item, !item.done, _state.value.me) }
     }
 
-    fun addChore(date: LocalDate, title: String, forWho: String?) =
-        write { repo.addChore(it, date, title, forWho, _state.value.me) }
+    fun addChore(date: LocalDate, title: String, forWho: String?, everyDays: Int? = null) =
+        write { repo.addChore(it, date, title, forWho, _state.value.me, everyDays) }
+
+    fun stopRepeating(item: Item) = write { repo.stopRepeating(it, item, LocalDate.now()) }
 
     fun saveDinner(existing: Item?, date: LocalDate, time: LocalTime, meal: String, cook: String?) = write {
         if (existing == null) repo.addDinner(it, date, time, meal, cook)

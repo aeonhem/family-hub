@@ -29,11 +29,23 @@ data class Item(
     val end: Long = 0L,
     val endDate: LocalDate = date,
     val recurring: Boolean = false,
+    val rrule: String? = null,
+    val seriesStart: Long = begin,
 ) {
     /** Identifies one occurrence; a repeating event shares its eventId. */
     val key: String get() = "$eventId@$begin"
 
     fun covers(day: LocalDate): Boolean = day >= date && day <= endDate
+
+    /**
+     * An open chore whose day has passed. These vanish at midnight (the
+     * server deletes them), and are never marked done, so they never count
+     * towards Erlina's ticked chores.
+     */
+    fun missed(today: LocalDate): Boolean = kind == Kind.CHORE && !done && endDate < today
+
+    /** "every 2 days" and so on, for a repeating event; null otherwise. */
+    val repeatText: String? get() = rrule?.let { repeatLabel(it) }
 
     val forWho: String? get() = meta["for"]
     val from: String? get() = meta["from"]
@@ -75,6 +87,32 @@ data class Item(
             }
             return meta to rest.joinToString("\n").trim()
         }
+
+        /** The RRULE for "every [days] days"; 7 is weekly. */
+        fun repeatRule(days: Int): String = when (days) {
+            1 -> "FREQ=DAILY"
+            7 -> "FREQ=WEEKLY"
+            else -> "FREQ=DAILY;INTERVAL=$days"
+        }
+
+        fun repeatLabel(rrule: String): String {
+            val parts = rrule.split(';').associate { it.substringBefore('=').uppercase() to it.substringAfter('=', "") }
+            val n = parts["INTERVAL"]?.toIntOrNull() ?: 1
+            val unit = when (parts["FREQ"]?.uppercase()) {
+                "WEEKLY" -> "week"
+                "MONTHLY" -> "month"
+                "YEARLY" -> "year"
+                else -> "day"
+            }
+            return if (n == 1) "every $unit" else "every $n ${unit}s"
+        }
+
+        /** [rrule] cut off so the last occurrence is on [lastDay] (all-day events). */
+        fun endRuleOn(rrule: String, lastDay: LocalDate): String =
+            (rrule.split(';').filter { p ->
+                val key = p.substringBefore('=').uppercase()
+                p.isNotBlank() && key != "UNTIL" && key != "COUNT"
+            } + "UNTIL=${lastDay.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)}").joinToString(";")
 
         fun buildDescription(meta: Map<String, String?>, note: String = ""): String =
             (meta.filterValues { !it.isNullOrBlank() }.map { (k, v) -> "$k: $v" } +

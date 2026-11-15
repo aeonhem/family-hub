@@ -92,6 +92,7 @@ def item_json(i: cs.Item) -> dict:
         "from": i.from_who,
         "cook": i.cook,
         "done_by": i.done_by,
+        "repeats": i.repeats,
     }
 
 
@@ -512,7 +513,10 @@ class Hub:
 
     async def toggle_chore(self, request: web.Request) -> web.Response:
         body = await request.json()
-        item = await gcal(self.cal.get, request.match_info["id"])
+        try:
+            item = await gcal(self.cal.get, request.match_info["id"])
+        except LookupError:
+            return web.json_response({"error": "That chore was from an earlier day and has been cleared"}, status=410)
         if item.kind != "chore":
             raise web.HTTPBadRequest(text="Not a chore")
         await gcal(self.cal.set_chore_done, item, bool(body.get("done")), name_or_none(body.get("by")) or "")

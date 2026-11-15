@@ -70,7 +70,7 @@ private val DEFAULT_DINNER_TIME: LocalTime = LocalTime.of(18, 0)
 fun TodayScreen(s: HubState, vm: HubViewModel) {
     val today = LocalDate.now()
     val dinner = s.items.firstOrNull { it.kind == Kind.DINNER && it.covers(today) }
-    val chores = choresFor(s.items) { it.covers(today) || (!it.done && it.endDate < today) }
+    val chores = choresFor(s.items) { it.covers(today) }
     // Anything not over yet, so a Mon-Fri camp shows every day it runs.
     val now = System.currentTimeMillis()
     val comingUp = s.items.filter {
@@ -263,14 +263,21 @@ fun ChoresScreen(s: HubState, vm: HubViewModel) {
     val weekStart = today.with(DayOfWeek.MONDAY)
     val week = (0L..6L).map { weekStart.plusDays(it) }
     val weekEnd = weekStart.plusDays(6)
-    val erlina = s.items.filter { it.kind == Kind.CHORE && it.forWho.equals("Erlina", ignoreCase = true) }
+    // Unticked chores from earlier days are cleared at midnight, so leave them out here too.
+    val erlina = s.items.filter { it.kind == Kind.CHORE && !it.missed(today) && it.forWho.equals("Erlina", ignoreCase = true) }
     // Chores Erlina ticked herself this week, whoever they were for.
     val ticked = s.items.count {
         it.kind == Kind.CHORE && it.done && it.doneBy.equals("Erlina", ignoreCase = true) &&
             it.date <= weekEnd && it.endDate >= weekStart
     }
-    val chores = choresFor(s.items) { (it.date <= weekEnd && it.endDate >= weekStart) || (!it.done && it.endDate < weekStart) }
+    val chores = choresFor(s.items) { !it.missed(today) && it.date <= weekEnd && it.endDate >= weekStart }
+    // One line per repeating chore, from its next open day.
+    val repeating = s.items
+        .filter { it.kind == Kind.CHORE && it.rrule != null && "UNTIL=" !in it.rrule.uppercase() && it.endDate >= today }
+        .sortedBy { it.date }
+        .distinctBy { it.eventId }
     var adding by remember { mutableStateOf(false) }
+    var stopping by remember { mutableStateOf<Item?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         HubCard {
@@ -300,18 +307,54 @@ fun ChoresScreen(s: HubState, vm: HubViewModel) {
             chores.forEach { ChoreRow(it, today, showDay = true, onToggle = { vm.toggleChore(it) }) }
         }
 
+        if (repeating.isNotEmpty()) {
+            HubCard {
+                Text("Repeating chores", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                repeating.forEach { r ->
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(r.title, fontSize = 15.sp, color = Hub.Ink)
+                            Text(
+                                listOfNotNull(r.forWho ?: "Anyone", r.repeatText?.replaceFirstChar { it.uppercase() })
+                                    .joinToString(" · "),
+                                fontSize = 12.sp, color = Hub.Muted,
+                            )
+                        }
+                        TextButton(onClick = { stopping = r }) { Text("Stop", color = Hub.TealText, fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
+        }
+
         DashedButton("Add a chore") { adding = true }
     }
 
-    if (adding) ChoreDialog(today, onDismiss = { adding = false }) { date, title, who ->
-        vm.addChore(date, title, who); adding = false
+    if (adding) ChoreDialog(today, onDismiss = { adding = false }) { date, title, who, every ->
+        vm.addChore(date, title, who, every); adding = false
+    }
+    stopping?.let { r ->
+        AlertDialog(
+            onDismissRequest = { stopping = null },
+            title = { Text("Stop \"${r.title}\"?") },
+            text = { Text("It won't come back after today. Today's one stays, and ticked ones still count.") },
+            confirmButton = { Button(onClick = { vm.stopRepeating(r); stopping = null }) { Text("Stop repeating") } },
+            dismissButton = { TextButton(onClick = { stopping = null }) { Text("Keep") } },
+        )
     }
 }
 
+/** Repeat choices for a new chore: label to every-N-days (null is just once). */
+private val REPEATS = listOf("Just once" to null, "Every day" to 1, "Every 2 days" to 2, "Every 3 days" to 3, "Weekly" to 7)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ChoreDialog(today: LocalDate, onDismiss: () -> Unit, onSave: (LocalDate, String, String?) -> Unit) {
+private fun ChoreDialog(today: LocalDate, onDismiss: () -> Unit, onSave: (LocalDate, String, String?, Int?) -> Unit) {
     var title by remember { mutableStateOf("") }
+    var every by remember { mutableStateOf<Int?>(null) }
     var who by remember { mutableStateOf<String?>("Erlina") }
     var day by remember { mutableStateOf(today) }
     AlertDialog(
@@ -331,10 +374,15 @@ private fun ChoreDialog(today: LocalDate, onDismiss: () -> Unit, onSave: (LocalD
                         Pill(label, day == d) { day = d }
                     }
                 }
+                Text("Repeat", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Hub.Muted)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    REPEATS.forEach { (label, n) -> Pill(label, every == n) { every = n } }
+                }
+                if (every != null) Text("Until you stop it under Repeating chores.", fontSize = 12.sp, color = Hub.Muted)
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(day, title.trim(), who?.takeIf { it != "Anyone" }) }, enabled = title.isNotBlank()) { Text("Add") }
+            Button(onClick = { onSave(day, title.trim(), who?.takeIf { it != "Anyone" }, every) }, enabled = title.isNotBlank()) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
@@ -439,14 +487,10 @@ private fun ChoreRow(c: Item, today: LocalDate, showDay: Boolean = false, onTogg
                 color = if (c.done) Hub.DoneInk else Hub.Ink,
                 textDecoration = if (c.done) TextDecoration.LineThrough else null,
             )
-            val dayText = when {
-                !c.done && c.endDate < today -> "Overdue"
-                c.covers(today) -> "Today"
-                else -> dayShort(c.date)
-            }
-            val sub = listOfNotNull(c.forWho ?: "Anyone", if (showDay || dayText == "Overdue") dayText else null,
-                c.doneBy?.let { "ticked by $it" })
-            Text(sub.joinToString(" · "), fontSize = 12.sp, color = if (dayText == "Overdue" && !c.done) Hub.MemoInk else Hub.Muted)
+            val dayText = if (c.covers(today)) "Today" else dayShort(c.date)
+            val sub = listOfNotNull(c.forWho ?: "Anyone", if (showDay) dayText else null,
+                c.repeatText?.let { "repeats $it" }, c.doneBy?.let { "ticked by $it" })
+            Text(sub.joinToString(" · "), fontSize = 12.sp, color = Hub.Muted)
         }
     }
 }
