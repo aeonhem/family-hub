@@ -1,5 +1,5 @@
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -110,3 +110,55 @@ def test_timed_event_end():
     ev = cs.parse_event({"id": "e", "summary": "Swim", "start": {"dateTime": "2026-10-06T16:00:00+10:00"},
                          "end": {"dateTime": "2026-10-06T17:00:00+10:00"}}, TZ)
     assert ev.end.hour == 17
+
+
+class ListingEvents(FakeEvents):
+    """Answers list() with fixed events and records deletes."""
+
+    def __init__(self, events):
+        super().__init__()
+        self.events = events
+        self._next = {}
+
+    def list(self, **kw):
+        self._next = {"items": self.events}
+        return self._call("list", **kw)
+
+    def delete(self, **kw):
+        self._next = {}
+        return self._call("delete", **kw)
+
+    def execute(self):
+        out, self._next = self._next, {}
+        return out
+
+
+def chore_ev(eid, day, done=False, who="Erlina"):
+    nxt = date.fromisoformat(day) + timedelta(days=1)
+    return {"id": eid, "summary": f"{'✅' if done else '☐'} Dishes", "description": f"for: {who}",
+            "start": {"date": day}, "end": {"date": nxt.isoformat()}}
+
+
+def test_missed_chores():
+    today = date(2026, 11, 15)
+    open_old = cs.parse_event(chore_ev("a", "2026-11-14"), TZ)
+    done_old = cs.parse_event(chore_ev("b", "2026-11-14", done=True), TZ)
+    open_today = cs.parse_event(chore_ev("c", "2026-11-15"), TZ)
+    assert cs.is_missed(open_old, today)
+    assert not cs.is_missed(done_old, today) and not cs.is_missed(open_today, today)
+    assert not cs.visible_chore(open_old, today) and cs.visible_chore(done_old, today)
+
+
+def test_clear_missed_chores_deletes_only_unticked_past_ones():
+    events = [
+        chore_ev("old_open", "2026-11-13"),
+        chore_ev("rep_20261114", "2026-11-14"),  # one day of a repeating chore
+        chore_ev("old_done", "2026-11-14", done=True),
+        chore_ev("today_open", "2026-11-15"),
+        {"id": "swim", "summary": "Swimming", "start": {"date": "2026-11-14"}, "end": {"date": "2026-11-15"}},
+    ]
+    svc = FakeService()
+    svc.ev = ListingEvents(events)
+    assert cs.FamilyCalendar(svc, "cal", TZ).clear_missed_chores(date(2026, 11, 15)) == 2
+    deleted = [kw["eventId"] for name, kw in svc.ev.calls if name == "delete"]
+    assert deleted == ["old_open", "rep_20261114"]

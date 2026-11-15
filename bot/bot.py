@@ -141,8 +141,9 @@ def week_bounds(d: date) -> tuple[date, date]:
 
 
 def kid_chores(items: list[cs.Item], d: date) -> list[cs.Item]:
-    """Chores for Erlina (or anyone) today, plus older ones still open."""
-    chores = [i for i in items if i.kind == "chore" and i.is_for(KID) and (i.day == d or (i.day < d and not i.done))]
+    """Chores for Erlina (or anyone) today. Ones left unticked from earlier
+    days are dropped at midnight, not carried over."""
+    chores = [i for i in items if i.kind == "chore" and i.is_for(KID) and i.covers(d)]
     return sorted(chores, key=lambda c: (c.done, c.day, c.title))
 
 
@@ -238,6 +239,12 @@ class ChoreButton(discord.ui.DynamicItem[discord.ui.Button], template=r"chore:(?
             now_done = not item.done
             await gcal(cal.set_chore_done, item, now_done, name)
             content, view, chores, week_count = await chores_message()
+        except LookupError:
+            # An old button for a chore cleared at midnight.
+            content, view, _, _ = await chores_message()
+            await interaction.edit_original_response(content=content, view=view)
+            await interaction.followup.send("That one was from an earlier day and has been cleared.", ephemeral=True)
+            return
         except Exception:
             log.exception("chore tick failed")
             await interaction.followup.send(SORRY, ephemeral=True)
@@ -257,8 +264,7 @@ async def chores_message() -> tuple[str, discord.ui.View, list[cs.Item], int]:
     view = discord.ui.View(timeout=None)
     for c in chores[:25]:
         prefix = "✅" if c.done else "☐"
-        overdue = " (overdue)" if c.day < d and not c.done else ""
-        view.add_item(ChoreButton(c.event_id, f"{prefix} {c.title}{overdue}", c.done))
+        view.add_item(ChoreButton(c.event_id, f"{prefix} {c.title}", c.done))
     return chores_text(chores), view, chores, ticked_this_week(items, d)
 
 
@@ -356,9 +362,10 @@ async def on_message(message: discord.Message):
 
 @tasks.loop(seconds=60)
 async def every_minute():
-    """DM Erlina new memos, and send the morning message once it's time (or
-    late, if the bot was down at MORNING)."""
+    """DM Erlina new memos, clear yesterday's unticked chores once a day, and
+    send the morning message once it's time (or late, if the bot was down at MORNING)."""
     try:
+        await clear_missed_chores()
         await deliver_memos()
         if not_sent_this_morning(datetime.now(TZ)):
             await send_morning()
@@ -394,6 +401,19 @@ async def deliver_memos() -> None:
         # Saved one at a time so a later failure never re-sends this one.
         state.setdefault("seen_memos", []).append(m.event_id)
         save_state()
+
+
+async def clear_missed_chores() -> None:
+    """Just after midnight, delete chores nobody ticked on their day. Deleted,
+    not ticked, so they never count towards Erlina's week."""
+    d = today()
+    if state.get("chores_cleared") == d.isoformat():
+        return
+    cleared = await gcal(cal.clear_missed_chores, d)
+    if cleared:
+        log.info("cleared %d unticked chore(s) from before %s", cleared, d)
+    state["chores_cleared"] = d.isoformat()
+    save_state()
 
 
 def not_sent_this_morning(now: datetime) -> bool:

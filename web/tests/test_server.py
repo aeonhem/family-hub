@@ -552,3 +552,26 @@ def test_refused_sign_in_waits_before_retrying(tmp_path, monkeypatch):
             pass
         assert len(tries) == 2
     asyncio.run(go())
+
+
+class ClearedCalendar(FakeCalendar):
+    def get(self, event_id):
+        raise LookupError("That chore has been cleared")
+
+
+def test_ticking_a_cleared_chore_says_so(tmp_path):
+    hub = server.Hub(ClearedCalendar([]), server.Store(tmp_path), "family", "https://x")
+    run_client(hub, _tick_cleared)
+
+
+async def _tick_cleared(client):
+    token = (await (await client.post("/api/login", json={"passcode": "family"})).json())["token"]
+    resp = await client.post("/api/chores/gone/done", json={"done": True, "by": "Erlina"},
+                             headers={"Authorization": f"Bearer {token}"})
+    assert resp.status == 410 and "cleared" in (await resp.json())["error"]
+
+
+def test_item_json_marks_repeating_chores():
+    ev = cs.parse_event({"id": "r_20261115", "recurringEventId": "r", "summary": "☐ Dishwasher",
+                         "start": {"date": "2026-11-15"}, "end": {"date": "2026-11-16"}}, TZ)
+    assert server.item_json(ev)["repeats"] is True

@@ -310,7 +310,7 @@ function mainScreen() {
 function todayTab() {
   const today = S.today;
   const dinner = S.items.find((i) => i.kind === 'dinner' && covers(i, today));
-  const chores = choresFor((i) => covers(i, today) || (!i.done && i.end_day < today));
+  const chores = choresFor((i) => covers(i, today));
   const now = Date.now();
   // Anything not over yet, so a Mon-Fri camp shows every day it runs.
   const comingUp = S.items.filter((i) => i.kind === 'event' && i.day <= D.add(today, 7) &&
@@ -402,11 +402,13 @@ function choresTab() {
   const weekStart = D.monday(today);
   const weekEnd = D.add(weekStart, 6);
   const week = [0, 1, 2, 3, 4, 5, 6].map((n) => D.add(weekStart, n));
-  const erlina = S.items.filter((i) => i.kind === 'chore' && (i.for || '').toLowerCase() === 'erlina');
+  // Unticked chores from earlier days are cleared at midnight, so they're left out here too.
+  const visible = (i) => i.done || i.end_day >= today;
+  const erlina = S.items.filter((i) => i.kind === 'chore' && visible(i) && (i.for || '').toLowerCase() === 'erlina');
   // Chores Erlina ticked herself this week, whoever they were for.
   const ticked = S.items.filter((i) => i.kind === 'chore' && i.done && (i.done_by || '').toLowerCase() === 'erlina' &&
     i.day <= weekEnd && i.end_day >= weekStart).length;
-  const chores = choresFor((i) => (i.day <= weekEnd && i.end_day >= weekStart) || (!i.done && i.end_day < weekStart));
+  const chores = choresFor((i) => visible(i) && i.day <= weekEnd && i.end_day >= weekStart);
 
   return `<div class="stack">
     <section class="card">
@@ -435,13 +437,13 @@ function choresFor(keep) {
 
 function choreRow(c, showDay = false) {
   const today = S.today;
-  const overdue = !c.done && c.end_day < today;
-  const dayText = overdue ? 'Overdue' : covers(c, today) ? 'Today' : D.short(c.day);
-  const sub = [c.for || 'Anyone', showDay || overdue ? dayText : null, c.done_by ? `ticked by ${c.done_by}` : null].filter(Boolean);
+  const dayText = covers(c, today) ? 'Today' : D.short(c.day);
+  const sub = [c.for || 'Anyone', showDay ? dayText : null, c.repeats ? 'repeats' : null,
+    c.done_by ? `ticked by ${c.done_by}` : null].filter(Boolean);
   return `<button class="chore ${c.done ? 'done' : ''}" role="checkbox" aria-checked="${c.done}" data-action="chore" data-id="${esc(c.id)}"
       aria-label="${c.done ? 'Untick' : 'Tick'} ${esc(c.title)}">
     <span class="box">${c.done ? svg('check') : ''}</span>
-    <span><span class="name">${esc(c.title)}</span><span class="sub ${overdue ? 'overdue' : ''}">${esc(sub.join(' · '))}</span></span>
+    <span><span class="name">${esc(c.title)}</span><span class="sub">${esc(sub.join(' · '))}</span></span>
   </button>`;
 }
 
