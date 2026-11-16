@@ -30,6 +30,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -92,10 +93,18 @@ class ShoppingViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Shows the new item straight away (with no id until the list is read back from Bring!). */
-    fun add(name: String, note: String = "") {
+    fun add(name: String, note: String = "", urgent: Boolean = false) {
         if (name.isBlank()) return
-        _state.update { it.copy(items = it.items + ShoppingItem("", name.trim(), note.trim())) }
-        send { client.add(it, name.trim(), note.trim()) }
+        _state.update { it.copy(items = it.items + ShoppingItem("", name.trim(), note.trim(), urgent)) }
+        send { client.add(it, name.trim(), note.trim(), urgent) }
+    }
+
+    /** Moves an item between the Urgent and Everyday sections. */
+    fun toggleUrgent(item: ShoppingItem) {
+        if (item.id.isEmpty()) return
+        val urgent = !item.urgent
+        _state.update { s -> s.copy(items = s.items.map { if (it.id == item.id) it.copy(urgent = urgent) else it }) }
+        send { client.setUrgent(it, item.id, urgent) }
     }
 
     fun done(item: ShoppingItem) {
@@ -139,7 +148,8 @@ fun ShoppingScreen(vm: ShoppingViewModel = viewModel()) {
 
         var name by rememberSaveable { mutableStateOf("") }
         var note by rememberSaveable { mutableStateOf("") }
-        val add = { vm.add(name, note); name = ""; note = "" }
+        var urgent by rememberSaveable { mutableStateOf(false) }
+        val add = { vm.add(name, note, urgent); name = ""; note = ""; urgent = false }
         HubCard {
             OutlinedTextField(
                 value = name, onValueChange = { name = it.take(60) },
@@ -153,23 +163,15 @@ fun ShoppingScreen(vm: ShoppingViewModel = viewModel()) {
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { if (name.isNotBlank()) add() }),
             )
+            Pill("Urgent", selected = urgent) { urgent = !urgent }
             Button(
                 onClick = add, enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Hub.Teal),
-            ) { Text(if (s.list.isBlank()) "Add" else "Add to ${s.list}", fontWeight = FontWeight.Bold) }
+            ) { Text(if (urgent) "Add to Urgent" else "Add to Everyday", fontWeight = FontWeight.Bold) }
         }
 
-        HubCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(s.list.ifBlank { "Shopping list" }, Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Hub.Ink)
-                Text("${s.items.size} to buy", fontSize = 13.sp, color = Hub.Muted)
-            }
-            when {
-                s.items.isNotEmpty() -> s.items.forEach { item -> key(item.id.ifEmpty { item.name }) { ShoppingRow(item) { vm.done(item) } } }
-                s.loading -> Text("Opening the shopping list…", color = Hub.Muted, fontSize = 14.sp)
-                else -> Text("Nothing to buy. Nice.", color = Hub.Muted, fontSize = 14.sp)
-            }
-        }
+        ShoppingSection("Urgent", Hub.MemoInk, s.items.filter { it.urgent }, if (s.loading) "Opening the shopping list…" else "Nothing urgent.", vm)
+        ShoppingSection("Everyday", Hub.Ink, s.items.filter { !it.urgent }, if (s.loading) "Opening the shopping list…" else "Nothing to buy. Nice.", vm)
 
         val onList = s.items.map { it.name.lowercase() }.toSet()
         val recent = s.recent.filter { it.name.lowercase() !in onList }
@@ -186,9 +188,30 @@ fun ShoppingScreen(vm: ShoppingViewModel = viewModel()) {
 }
 
 @Composable
-private fun ShoppingRow(item: ShoppingItem, onDone: () -> Unit) {
+private fun ShoppingSection(title: String, color: Color, items: List<ShoppingItem>, empty: String, vm: ShoppingViewModel) {
+    HubCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = color)
+            Text("${items.size} to buy", fontSize = 13.sp, color = Hub.Muted)
+        }
+        if (items.isEmpty()) Text(empty, color = Hub.Muted, fontSize = 14.sp)
+        items.forEach { item ->
+            key(item.id.ifEmpty { item.name }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ShoppingRow(item, Modifier.weight(1f)) { vm.done(item) }
+                    TextButton(onClick = { vm.toggleUrgent(item) }, enabled = item.id.isNotEmpty(),
+                        modifier = Modifier.semantics { contentDescription = "Move ${item.name} to ${if (item.urgent) "Everyday" else "Urgent"}" },
+                    ) { Text(if (item.urgent) "Not urgent" else "Urgent", fontSize = 13.sp) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShoppingRow(item: ShoppingItem, modifier: Modifier = Modifier, onDone: () -> Unit) {
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
             .clickable(role = Role.Checkbox, onClick = onDone)

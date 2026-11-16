@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -31,8 +32,28 @@ class ShoppingError(Exception):
     pass
 
 
+# Urgent items carry this word at the start of their Bring! note ("Urgent" or
+# "Urgent · 2 litres"), so the Bring! app shows it too and nothing extra is stored.
+URGENT = "Urgent"
+_URGENT_RE = re.compile(r"^\s*urgent\b[\s·:,-]*", re.IGNORECASE)
+
+
+def split_note(spec: str | None) -> tuple[bool, str]:
+    """A Bring! note as (urgent, the rest of the note)."""
+    spec = spec or ""
+    m = _URGENT_RE.match(spec)
+    return (True, spec[m.end():].strip()) if m else (False, spec.strip())
+
+
+def join_note(urgent: bool, note: str) -> str:
+    if not urgent:
+        return note
+    return f"{URGENT} · {note}" if note else URGENT
+
+
 def item_json(purchase) -> dict:
-    return {"id": purchase.uuid, "name": purchase.itemId, "note": purchase.specification or ""}
+    urgent, note = split_note(purchase.specification)
+    return {"id": purchase.uuid, "name": purchase.itemId, "note": note, "urgent": urgent}
 
 
 def pick_list(lists: list, wanted: str | None, default_uuid: str):
@@ -93,16 +114,26 @@ class Shopping:
         return {"list": self.title, "items": [item_json(p) for p in lst.items.purchase],
                 "recent": [item_json(p) for p in lst.items.recently[:RECENT]]}
 
-    async def add(self, name: str, note: str = "") -> None:
-        await self._call(lambda b: b.save_item(self.list_uuid, name, note))
+    async def add(self, name: str, note: str = "", urgent: bool = False) -> None:
+        await self._call(lambda b: b.save_item(self.list_uuid, name, join_note(urgent, note)))
 
-    async def done(self, item_id: str) -> None:
-        """Ticks an item off (Bring! moves it to its recent list). Looks the item
-        up first, so a phone can only tick off what's really on the list."""
+    async def _find(self, item_id: str):
+        """The item on the list, so a phone can only change what's really there."""
         lst = await self._call(lambda b: b.get_list(self.list_uuid))
         found = next((p for p in lst.items.purchase if p.uuid == item_id), None)
         if not found:
             raise KeyError(item_id)
+        return found
+
+    async def set_urgent(self, item_id: str, urgent: bool) -> None:
+        """Moves an item between the Urgent and Everyday sections, keeping its note."""
+        found = await self._find(item_id)
+        note = join_note(urgent, split_note(found.specification)[1])
+        await self._call(lambda b: b.update_item(self.list_uuid, found.itemId, note, found.uuid))
+
+    async def done(self, item_id: str) -> None:
+        """Ticks an item off (Bring! moves it to its recent list)."""
+        found = await self._find(item_id)
         await self._call(lambda b: b.complete_item(self.list_uuid, found.itemId, found.specification, found.uuid))
 
     async def close(self) -> None:

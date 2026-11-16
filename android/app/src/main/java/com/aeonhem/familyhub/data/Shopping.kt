@@ -4,8 +4,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
 
-/** An item on the family's Bring! list. [note] is Bring!'s "specification", e.g. "2 litres". */
-data class ShoppingItem(val id: String, val name: String, val note: String = "")
+/** An item on the family's Bring! list. [note] is Bring!'s "specification", e.g. "2 litres";
+ *  [urgent] puts it in the Urgent section (the server keeps that as "Urgent" in the Bring! note). */
+data class ShoppingItem(val id: String, val name: String, val note: String = "", val urgent: Boolean = false)
 
 /** The list's name, what's to buy, and what was bought recently (for a one tap re-add). */
 class ShoppingList(val name: String, val items: List<ShoppingItem>, val recent: List<ShoppingItem>)
@@ -15,8 +16,12 @@ class ShoppingClient(private val base: String = FAMILY_SERVER) {
 
     fun list(token: String): ShoppingList = parse(JSONObject(call("GET", "/api/shopping", token, null)))
 
-    fun add(token: String, name: String, note: String = "") {
-        call("POST", "/api/shopping", token, JSONObject().put("name", name).put("note", note))
+    fun add(token: String, name: String, note: String = "", urgent: Boolean = false) {
+        call("POST", "/api/shopping", token, JSONObject().put("name", name).put("note", note).put("urgent", urgent))
+    }
+
+    fun setUrgent(token: String, id: String, urgent: Boolean) {
+        call("POST", "/api/shopping/${URLEncoder.encode(id, "UTF-8")}/urgent", token, JSONObject().put("urgent", urgent))
     }
 
     fun done(token: String, id: String) {
@@ -34,7 +39,7 @@ class ShoppingClient(private val base: String = FAMILY_SERVER) {
         )
 
         private fun items(arr: JSONArray?) = (0 until (arr?.length() ?: 0)).map { i ->
-            arr!!.getJSONObject(i).let { ShoppingItem(it.getString("id"), it.getString("name"), it.optString("note", "")) }
+            arr!!.getJSONObject(i).let { ShoppingItem(it.getString("id"), it.getString("name"), it.optString("note", ""), it.optBoolean("urgent", false)) }
         }
     }
 }

@@ -448,14 +448,20 @@ import shopping  # noqa: E402
 
 class FakeShopping:
     def __init__(self):
-        self.list = [{"id": "u1", "name": "Milk", "note": "low fat"}]
+        self.list = [{"id": "u1", "name": "Milk", "note": "low fat", "urgent": False}]
         self.added = []
+        self.urgent = []
 
     async def items(self):
         return {"list": "Family", "items": self.list, "recent": []}
 
-    async def add(self, name, note=""):
-        self.added.append((name, note))
+    async def add(self, name, note="", urgent=False):
+        self.added.append((name, note, urgent))
+
+    async def set_urgent(self, item_id, urgent):
+        if not any(i["id"] == item_id for i in self.list):
+            raise KeyError(item_id)
+        self.urgent.append((item_id, urgent))
 
     async def done(self, item_id):
         if item_id == "down":
@@ -483,14 +489,31 @@ async def _shopping_api(client, fake):
         assert body["list"] == "Family" and body["items"][0]["name"] == "Milk"
     auth = {"Authorization": f"Bearer {family}"}
     assert (await client.post("/api/shopping", json={"name": "  Eggs ", "note": " 12 "}, headers=auth)).status == 200
+    assert (await client.post("/api/shopping", json={"name": "Nappies", "urgent": True}, headers=auth)).status == 200
     for bad in [{}, {"name": ""}, {"name": "  "}, {"name": 5}, {"name": "x" * 61}, {"name": "Eggs", "note": None},
-                {"name": "Eggs", "note": "x" * 81}]:
+                {"name": "Eggs", "note": "x" * 81}, {"name": "Eggs", "urgent": "yes"}]:
         assert (await client.post("/api/shopping", json=bad, headers=auth)).status == 400, bad
-    assert fake.added == [("Eggs", "12")]
+    assert fake.added == [("Eggs", "12", False), ("Nappies", "", True)]
+    assert (await client.post("/api/shopping/u1/urgent", json={"urgent": True}, headers=auth)).status == 200
+    assert (await client.post("/api/shopping/u1/urgent", json={"urgent": 1}, headers=auth)).status == 400
+    assert (await client.post("/api/shopping/nope/urgent", json={"urgent": False}, headers=auth)).status == 404
+    assert fake.urgent == [("u1", True)]
     assert (await client.post("/api/shopping/u1/done", headers=auth)).status == 200
     assert (await client.post("/api/shopping/u1/done", headers=auth)).status == 404
     down = await client.post("/api/shopping/down/done", headers=auth)
     assert down.status == 502 and (await down.json())["error"] == "Can't reach Bring! right now"
+
+
+def test_urgent_lives_in_the_bring_note():
+    split, join = shopping.split_note, shopping.join_note
+    assert split("Urgent") == (True, "")
+    assert split("urgent · 2 litres") == (True, "2 litres")
+    assert split("URGENT: 2 litres") == (True, "2 litres")
+    assert split("Urgently needed") == (False, "Urgently needed")
+    assert split(None) == (False, "") and split(" 2 litres ") == (False, "2 litres")
+    assert join(True, "") == "Urgent" and join(True, "2 litres") == "Urgent · 2 litres" and join(False, "x") == "x"
+    for urgent, note in [(True, ""), (True, "2 litres"), (False, "2 litres")]:
+        assert split(join(urgent, note)) == (urgent, note)
 
 
 def test_shopping_off_without_keys(tmp_path):

@@ -207,6 +207,15 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .chore.done .name { color: var(--done-ink); text-decoration: line-through; }
 .chore .sub { font-size: 12px; color: var(--muted); }
 
+/* ---------- Shopping ---------- */
+
+.shop-row { display: flex; align-items: center; gap: 8px; }
+.shop-row .chore { flex: 1; min-width: 0; }
+.shop-row .move { flex: none; min-height: 44px; padding: 0 6px; font-size: 13px; }
+.urgent-title { color: var(--memo-ink); }
+.pill.urgent { color: var(--memo-ink); border-color: var(--memo-ink); }
+.pill.urgent[aria-pressed="true"] { background: var(--memo-ink); border-color: var(--memo-ink); color: #fff; }
+
 .week { display: flex; gap: 6px; }
 .week > div {
   flex: 1;

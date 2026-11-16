@@ -112,6 +112,7 @@ const S = {
   shoppingError: '',
   shopName: '',
   shopNote: '',
+  shopUrgent: false, // add the next item to the Urgent section
 };
 if (!TABS.some((t) => t.id === S.tab)) S.tab = 'today';
 if (!THEMES.some((t) => t.id === S.theme)) S.theme = 'teal';
@@ -487,19 +488,30 @@ function shoppingTab() {
   }
   const onList = new Set(sh.items.map((i) => i.name.toLowerCase()));
   const recent = sh.recent.filter((i) => !onList.has(i.name.toLowerCase()));
+  const urgent = sh.items.filter((i) => i.urgent), everyday = sh.items.filter((i) => !i.urgent);
+  const rows = (items) => items.map((i) => `<div class="shop-row">
+        <button class="chore" role="checkbox" aria-checked="false" data-action="shop-done" data-id="${esc(i.id)}" aria-label="Got ${esc(i.name)}">
+          <span class="box"></span>
+          <span><span class="name">${esc(i.name)}</span>${i.note ? `<span class="sub">${esc(i.note)}</span>` : ''}</span>
+        </button>
+        <button class="link move" data-action="shop-urgent" data-id="${esc(i.id)}" ${i.id ? '' : 'disabled'}
+          aria-label="Move ${esc(i.name)} to ${i.urgent ? 'Everyday' : 'Urgent'}">${i.urgent ? 'Not urgent' : 'Urgent'}</button>
+      </div>`).join('');
   return `<div class="stack tight">
     ${S.shoppingError ? `<div class="error-text">${esc(S.shoppingError)}</div>` : ''}
     <section class="card">
       <div class="field"><input id="shop-name" maxlength="60" placeholder=" " autocomplete="off" value="${esc(S.shopName)}"><label for="shop-name">Add an item</label></div>
       <div class="field"><input id="shop-note" maxlength="80" placeholder=" " autocomplete="off" value="${esc(S.shopNote)}"><label for="shop-note">Note, e.g. 2 litres (optional)</label></div>
-      <button class="btn block" data-action="shop-add" ${S.shopName.trim() ? '' : 'disabled'}>Add to ${esc(sh.list)}</button>
+      <div class="pills"><button class="pill urgent" data-action="shop-urgent-new" aria-pressed="${S.shopUrgent}">Urgent</button></div>
+      <button class="btn block" data-action="shop-add" ${S.shopName.trim() ? '' : 'disabled'}>Add to ${S.shopUrgent ? 'Urgent' : 'Everyday'}</button>
     </section>
     <section class="card">
-      <div class="card-head"><span class="card-title">${esc(sh.list)}</span><span class="small-muted">${sh.items.length} to buy</span></div>
-      ${sh.items.length ? sh.items.map((i) => `<button class="chore" role="checkbox" aria-checked="false" data-action="shop-done" data-id="${esc(i.id)}" aria-label="Got ${esc(i.name)}">
-          <span class="box"></span>
-          <span><span class="name">${esc(i.name)}</span>${i.note ? `<span class="sub">${esc(i.note)}</span>` : ''}</span>
-        </button>`).join('') : '<div class="empty">Nothing to buy. Nice.</div>'}
+      <div class="card-head"><span class="card-title urgent-title">Urgent</span><span class="small-muted">${urgent.length} to buy</span></div>
+      ${urgent.length ? rows(urgent) : '<div class="empty">Nothing urgent.</div>'}
+    </section>
+    <section class="card">
+      <div class="card-head"><span class="card-title">Everyday</span><span class="small-muted">${everyday.length} to buy</span></div>
+      ${everyday.length ? rows(everyday) : '<div class="empty">Nothing to buy. Nice.</div>'}
     </section>
     ${recent.length ? `<section class="card">
       <div class="card-title">Bought recently</div>
@@ -629,16 +641,28 @@ const actions = {
   },
 
   'shop-add'() {
-    const name = S.shopName.trim(), note = S.shopNote.trim();
+    const name = S.shopName.trim(), note = S.shopNote.trim(), urgent = S.shopUrgent;
     if (!name) return;
-    S.shopName = ''; S.shopNote = '';
-    if (S.shopping) S.shopping.items.push({ id: '', name, note });
+    S.shopName = ''; S.shopNote = ''; S.shopUrgent = false;
+    if (S.shopping) S.shopping.items.push({ id: '', name, note, urgent });
     render(); focusSoon('shop-name');
-    shop('/api/shopping', { name, note }, `Added ${name}`);
+    shop('/api/shopping', { name, note, urgent }, `Added ${name}${urgent ? ' to Urgent' : ''}`);
+  },
+  'shop-urgent-new'() {
+    S.shopUrgent = !S.shopUrgent;
+    render();
+  },
+  'shop-urgent'(el) {
+    const item = el.dataset.id && S.shopping.items.find((i) => i.id === el.dataset.id);
+    if (!item) return;
+    item.urgent = !item.urgent;
+    render();
+    shop(`/api/shopping/${encodeURIComponent(item.id)}/urgent`, { urgent: item.urgent },
+      `${item.name} moved to ${item.urgent ? 'Urgent' : 'Everyday'}`);
   },
   'shop-again'(el) {
     const { name, note } = el.dataset;
-    S.shopping.items.push({ id: '', name, note });
+    S.shopping.items.push({ id: '', name, note, urgent: false });
     render();
     shop('/api/shopping', { name, note }, `Added ${name}`);
   },

@@ -217,14 +217,16 @@ def light_change(body: dict) -> dict:
     return {k: v for k, v in change.items() if v is not None}
 
 
-def shopping_item(body: dict) -> tuple[str, str]:
-    """A new shopping list item's name and note, checked."""
-    name, note = body.get("name"), body.get("note", "")
+def shopping_item(body: dict) -> tuple[str, str, bool]:
+    """A new shopping list item's name, note and urgency, checked."""
+    name, note, urgent = body.get("name"), body.get("note", ""), body.get("urgent", False)
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > shopping.MAX_NAME:
         raise web.HTTPBadRequest(text=f"name must be 1 to {shopping.MAX_NAME} characters")
     if not isinstance(note, str) or len(note.strip()) > shopping.MAX_NOTE:
         raise web.HTTPBadRequest(text=f"note must be up to {shopping.MAX_NOTE} characters")
-    return name.strip(), note.strip()
+    if not isinstance(urgent, bool):
+        raise web.HTTPBadRequest(text="urgent must be true or false")
+    return name.strip(), note.strip(), urgent
 
 
 def name_or_none(value) -> str | None:
@@ -476,8 +478,18 @@ class Hub:
         return web.json_response(await self._shop().items())
 
     async def shopping_add(self, request: web.Request) -> web.Response:
-        name, note = shopping_item(await request.json())
-        await self._shop().add(name, note)
+        name, note, urgent = shopping_item(await request.json())
+        await self._shop().add(name, note, urgent)
+        return web.json_response({"ok": True})
+
+    async def shopping_urgent(self, request: web.Request) -> web.Response:
+        urgent = (await request.json()).get("urgent")
+        if not isinstance(urgent, bool):
+            raise web.HTTPBadRequest(text="urgent must be true or false")
+        try:
+            await self._shop().set_urgent(request.match_info["id"], urgent)
+        except KeyError:
+            raise web.HTTPNotFound(text="That's not on the list any more")
         return web.json_response({"ok": True})
 
     async def shopping_done(self, request: web.Request) -> web.Response:
@@ -713,6 +725,7 @@ def make_app(hub: Hub) -> web.Application:
     app.router.add_get("/api/shopping", hub.shopping_list)
     app.router.add_post("/api/shopping", hub.shopping_add)
     app.router.add_post("/api/shopping/{id}/done", hub.shopping_done)
+    app.router.add_post("/api/shopping/{id}/urgent", hub.shopping_urgent)
 
     async def index(request):
         return web.FileResponse(STATIC / "index.html")
