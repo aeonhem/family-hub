@@ -13,6 +13,13 @@ Everything is an event on the **Family** calendar that Google creates for a
 Google family group. Julian and Sally already see it, so on day one dinner,
 chores and memos appear in the Calendar app they use with no install at all.
 
+Chores have their own **Family Chores** calendar (owned by a parent, shared
+with the other parent; the bot signs in as Julian). Google keeps all-day
+alerts per person and per calendar, so this lets Julian and Sally mute chore
+alerts and keep the rest. The bot and web server find it through
+`CHORES_CALENDAR_ID`; the app finds it by name on the phone. Without it,
+chores stay on Family. See [chores-calendar-plan.md](chores-calendar-plan.md).
+
 ```
           ┌──────────────────────────────────┐
           │  Google Calendar: "Family"       │

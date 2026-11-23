@@ -64,7 +64,7 @@ def _calendar() -> cs.FamilyCalendar:
     # for tokens from the current authorize.py).
     creds = Credentials.from_authorized_user_file(os.getenv("GOOGLE_TOKEN_FILE", "token.json"))
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
-    return cs.FamilyCalendar(service, os.environ["FAMILY_CALENDAR_ID"], TZ)
+    return cs.FamilyCalendar(service, os.environ["FAMILY_CALENDAR_ID"], TZ, os.getenv("CHORES_CALENDAR_ID"))
 
 
 # ---------- Google calls ----------

@@ -48,6 +48,12 @@ outside accounts, so the bot signs in as you once and keeps a token.
 5. The Family calendar id is
    `family04174376375408900708@group.calendar.google.com`
    (`FAMILY_CALENDAR_ID`).
+6. Optional: chores on their own calendar, so people can mute chore alerts.
+   In Google Calendar make a calendar named **Family Chores** and share it
+   with the other parent and the account from step 4 ("Make changes to
+   events"). Put its id in `CHORES_CALENDAR_ID`. Then move the existing
+   chores once: `python move_chores.py` (add `--dry-run` first to see the
+   list). See [../docs/chores-calendar-plan.md](../docs/chores-calendar-plan.md).
 
 ### 3. Free cloud server (Google Cloud)
 

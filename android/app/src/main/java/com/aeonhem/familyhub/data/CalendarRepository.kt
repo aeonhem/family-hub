@@ -41,8 +41,22 @@ data class CalendarInfo(
         else -> 0
     }
 
-    private companion object {
-        val FAMILY_ID = Regex("^family\\d+@group\\.calendar\\.google\\.com$", RegexOption.IGNORE_CASE)
+    /** The calendar chores go on, so each person can mute chore alerts. */
+    val isChores: Boolean get() = name.trim().equals(CHORES_NAME, ignoreCase = true)
+
+    companion object {
+        const val CHORES_NAME = "Family Chores"
+        private val FAMILY_ID = Regex("^family\\d+@group\\.calendar\\.google\\.com$", RegexOption.IGNORE_CASE)
+
+        /**
+         * The phone's "Family Chores" calendar, if it has one it can write to.
+         * The saved one wins while it is still there. Null means chores stay
+         * on Family, so a phone that is not set up yet still works.
+         */
+        fun pickChores(cals: List<CalendarInfo>, savedId: Long, familyId: Long?): CalendarInfo? {
+            val usable = cals.filter { it.isChores && it.canWrite && it.id != familyId }
+            return usable.firstOrNull { it.id == savedId } ?: usable.firstOrNull()
+        }
     }
 }
 
@@ -104,7 +118,11 @@ class CalendarRepository(private val resolver: ContentResolver) {
     }
 
     /** All event occurrences on [calendarId] that overlap [from]..[to] (local dates). */
-    fun load(calendarId: Long, from: LocalDate, to: LocalDate): List<Item> {
+    fun load(calendarId: Long, from: LocalDate, to: LocalDate): List<Item> = load(listOf(calendarId), from, to)
+
+    /** The same for several calendars (Family and Family Chores), merged in start order. */
+    fun load(calendarIds: List<Long>, from: LocalDate, to: LocalDate): List<Item> {
+        if (calendarIds.isEmpty()) return emptyList()
         // Pad by a day each side: all-day events are stored at UTC midnight,
         // which is a different local day in Brisbane.
         val begin = from.minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -126,7 +144,9 @@ class CalendarRepository(private val resolver: ContentResolver) {
         )
         val out = mutableListOf<Item>()
         resolver.query(
-            uri, projection, "${Instances.CALENDAR_ID} = ?", arrayOf(calendarId.toString()),
+            uri, projection,
+            "${Instances.CALENDAR_ID} IN (${calendarIds.joinToString(",") { "?" }})",
+            calendarIds.map { it.toString() }.toTypedArray(),
             "${Instances.BEGIN} ASC",
         )?.use { c ->
             while (c.moveToNext()) {
@@ -183,7 +203,10 @@ class CalendarRepository(private val resolver: ContentResolver) {
         requestSync(cal)
     }
 
-    /** A chore on [date]; with [everyDays] it repeats until someone stops it. */
+    /**
+     * A chore on [date]; with [everyDays] it repeats until someone stops it.
+     * [cal] is the Family Chores calendar when the phone has one, else Family.
+     */
     fun addChore(cal: CalendarInfo, date: LocalDate, title: String, forWho: String?, from: String?, everyDays: Int? = null) {
         val start = date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
         insertEvent(

@@ -1,6 +1,9 @@
 # Calendar conventions
 
-All on the **Family** calendar. The app and bot write these; anyone can also
+All on the **Family** calendar, except chores: those go on the **Family
+Chores** calendar when there is one, so each person can turn off chore alerts
+for that calendar only. The app, web app and bot read chores from both, so a
+chore on either one works. The app and bot write these; anyone can also
 create them by hand in Google Calendar using the same title prefix.
 
 | Thing | Event shape | Example title |
