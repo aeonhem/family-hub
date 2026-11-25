@@ -33,6 +33,7 @@ class Item:
     end_day: date | None = None  # last day it covers; None means just [day]
     end: datetime | None = None  # None for all-day events
     repeats: bool = False  # one day of a repeating event
+    calendar_id: str = ""  # the calendar it came from; "" means the Family one
 
     def covers(self, d: date) -> bool:
         """True when the event is on [d], including the middle of a multi-day event."""
@@ -103,7 +104,7 @@ def build_description(meta: dict[str, str | None], note: str = "") -> str:
     return "\n".join(lines)
 
 
-def parse_event(ev: dict, tz: ZoneInfo) -> Item:
+def parse_event(ev: dict, tz: ZoneInfo, calendar_id: str = "") -> Item:
     kind, done, title = parse_title(ev.get("summary", ""))
     meta, note = parse_description(ev.get("description"))
     start, end = ev.get("start", {}), ev.get("end", {})
@@ -119,36 +120,62 @@ def parse_event(ev: dict, tz: ZoneInfo) -> Item:
         # All-day end dates are exclusive.
         end_day = date.fromisoformat(end["date"]) - timedelta(days=1) if "date" in end else day
     return Item(ev["id"], kind, title, day, start_dt, done, meta, note, max(end_day, day), end_dt,
-                bool(ev.get("recurringEventId")))
+                bool(ev.get("recurringEventId")), calendar_id)
 
 
 def _local(stamp: str, tz: ZoneInfo) -> datetime:
     return datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(tz)
 
 
-class FamilyCalendar:
-    """Thin wrapper over the Calendar API. `service` is a googleapiclient resource."""
+def _not_found(e: Exception) -> bool:
+    """True for the Calendar API's 404/410 (googleapiclient HttpError)."""
+    return getattr(getattr(e, "resp", None), "status", None) in (404, 410)
 
-    def __init__(self, service, calendar_id: str, tz: ZoneInfo):
+
+class FamilyCalendar:
+    """Thin wrapper over the Calendar API. `service` is a googleapiclient resource.
+
+    Chores go on their own calendar when [chores_calendar_id] is set, so each
+    person can mute their alerts. Reads merge both calendars, and old chores
+    still on Family keep working. Blank means one calendar for everything."""
+
+    def __init__(self, service, calendar_id: str, tz: ZoneInfo, chores_calendar_id: str | None = None):
         self.service = service
         self.calendar_id = calendar_id
+        self.chores_calendar_id = (chores_calendar_id or "").strip() or None
         self.tz = tz
 
+    @property
+    def calendar_ids(self) -> list[str]:
+        return [self.calendar_id] + ([self.chores_calendar_id] if self.chores_calendar_id else [])
+
+    def _cal(self, item: Item) -> str:
+        return item.calendar_id or self.calendar_id
+
     def items(self, start: date, end: date) -> list[Item]:
-        """Every event on any local day in start..end (inclusive)."""
+        """Every event on any local day in start..end (inclusive), from every calendar."""
+        out: list[Item] = []
+        for cal_id in self.calendar_ids:
+            out += self._items(cal_id, start, end)
+        if len(self.calendar_ids) > 1:
+            # Same order the API gives for one calendar: by start, all-day at local midnight.
+            out.sort(key=lambda i: i.start or datetime.combine(i.day, time.min, self.tz))
+        return out
+
+    def _items(self, cal_id: str, start: date, end: date) -> list[Item]:
         time_min = datetime.combine(start - timedelta(days=1), time.min, self.tz).isoformat()
         time_max = datetime.combine(end + timedelta(days=2), time.min, self.tz).isoformat()
         out: list[Item] = []
         page = None
         while True:
             resp = self.service.events().list(
-                calendarId=self.calendar_id, timeMin=time_min, timeMax=time_max,
+                calendarId=cal_id, timeMin=time_min, timeMax=time_max,
                 singleEvents=True, orderBy="startTime", maxResults=250, pageToken=page,
             ).execute()
             for ev in resp.get("items", []):
                 if ev.get("status") == "cancelled":
                     continue
-                item = parse_event(ev, self.tz)
+                item = parse_event(ev, self.tz, cal_id)
                 if item.day <= end and (item.end_day or item.day) >= start:
                     out.append(item)
             page = resp.get("nextPageToken")
@@ -160,7 +187,7 @@ class FamilyCalendar:
         meta["done-by"] = by if done else None
         prefix = CHORE_DONE if done else CHORE_OPEN
         self.service.events().patch(
-            calendarId=self.calendar_id, eventId=item.event_id,
+            calendarId=self._cal(item), eventId=item.event_id,
             body={"summary": f"{prefix} {item.title}", "description": build_description(meta, item.note)},
         ).execute()
 
@@ -181,14 +208,17 @@ class FamilyCalendar:
         ).execute()
 
     def add_chore(self, day: date, title: str, for_who: str | None, from_who: str | None) -> None:
-        """An all-day event on [day], like the Android app's "Add a chore"."""
+        """An all-day event on [day], like the Android app's "Add a chore".
+        On the chores calendar when there is one. No reminder for the bot's own
+        account; everyone else's alerts follow their own calendar settings."""
         self.service.events().insert(
-            calendarId=self.calendar_id,
+            calendarId=self.chores_calendar_id or self.calendar_id,
             body={
                 "summary": f"{CHORE_OPEN} {title}",
                 "description": build_description({"for": for_who, "from": from_who}),
                 "start": {"date": day.isoformat()},
                 "end": {"date": (day + timedelta(days=1)).isoformat()},
+                "reminders": {"useDefault": False, "overrides": []},
             },
         ).execute()
 
@@ -206,7 +236,7 @@ class FamilyCalendar:
         }
         events = self.service.events()
         if existing:
-            events.patch(calendarId=self.calendar_id, eventId=existing.event_id, body=body).execute()
+            events.patch(calendarId=self._cal(existing), eventId=existing.event_id, body=body).execute()
         else:
             events.insert(calendarId=self.calendar_id, body=body).execute()
 
@@ -216,11 +246,24 @@ class FamilyCalendar:
         missed = [i for i in self.items(today - timedelta(days=look_back), today - timedelta(days=1))
                   if is_missed(i, today)]
         for i in missed:
-            self.service.events().delete(calendarId=self.calendar_id, eventId=i.event_id).execute()
+            self.service.events().delete(calendarId=self._cal(i), eventId=i.event_id).execute()
         return len(missed)
 
     def get(self, event_id: str) -> Item:
-        ev = self.service.events().get(calendarId=self.calendar_id, eventId=event_id).execute()
-        if ev.get("status") == "cancelled":
-            raise LookupError("That chore has been cleared")
-        return parse_event(ev, self.tz)
+        """Looks on the chores calendar first, then Family. Moved chores keep
+        their ID, so old links and Discord buttons still find them."""
+        ids = self.calendar_ids[::-1]
+        for n, cal_id in enumerate(ids):
+            last = n == len(ids) - 1
+            try:
+                ev = self.service.events().get(calendarId=cal_id, eventId=event_id).execute()
+            except Exception as e:
+                if _not_found(e) and not last:
+                    continue
+                raise
+            if ev.get("status") == "cancelled":
+                if not last:
+                    continue
+                raise LookupError("That chore has been cleared")
+            return parse_event(ev, self.tz, cal_id)
+        raise LookupError("That chore has been cleared")

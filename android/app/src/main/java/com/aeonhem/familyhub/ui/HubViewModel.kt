@@ -34,6 +34,7 @@ data class HubState(
     val me: String? = null,
     val calendars: List<CalendarInfo> = emptyList(),
     val calendar: CalendarInfo? = null,
+    val choresCalendar: CalendarInfo? = null, // "Family Chores"; null means chores go on [calendar]
     val items: List<Item> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null,
@@ -110,11 +111,18 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
                 saved != null && saved.familyRank >= (best?.familyRank ?: 0) -> saved
                 else -> best ?: saved
             }
-            _state.update { it.copy(calendars = cals.filter { c -> c.synced || c.isFamily }, calendar = chosen) }
+            val chores = CalendarInfo.pickChores(cals, prefs.getLong("choresCalendarId", -1L), chosen?.id)
+            _state.update {
+                it.copy(calendars = cals.filter { c -> c.synced || c.isFamily }, calendar = chosen, choresCalendar = chores)
+            }
             chosen?.let {
                 prefs.edit().putLong("calendarId", it.id).apply()
                 withContext(Dispatchers.IO) { repo.ensureSynced(it) }
                 MemoJobs.schedule(getApplication<Application>())
+            }
+            chores?.let {
+                prefs.edit().putLong("choresCalendarId", it.id).apply()
+                withContext(Dispatchers.IO) { repo.ensureSynced(it) }
             }
             // Re-sent on every start, so the server always has this phone's current push token.
             MemoPush.register(getApplication<Application>())
@@ -143,6 +151,8 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refresh() {
         val cal = _state.value.calendar ?: return
+        // Chores can be on both: old ones stay on Family until they are moved.
+        val ids = listOfNotNull(cal.id, _state.value.choresCalendar?.id?.takeIf { it != cal.id })
         val today = LocalDate.now()
         val weekStart = today.with(DayOfWeek.MONDAY)
         // A newer refresh replaces one still running.
@@ -150,7 +160,7 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
         refreshJob = viewModelScope.launch {
             _state.update { it.copy(loading = true) }
             val result = withContext(Dispatchers.IO) {
-                runCatching { repo.load(cal.id, weekStart.minusDays(14), today.plusDays(14)) }
+                runCatching { repo.load(ids, weekStart.minusDays(14), today.plusDays(14)) }
             }
             _state.update {
                 it.copy(
@@ -180,7 +190,7 @@ class HubViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun addChore(date: LocalDate, title: String, forWho: String?, everyDays: Int? = null) =
-        write { repo.addChore(it, date, title, forWho, _state.value.me, everyDays) }
+        write { repo.addChore(_state.value.choresCalendar ?: it, date, title, forWho, _state.value.me, everyDays) }
 
     fun stopRepeating(item: Item) = write { repo.stopRepeating(it, item, LocalDate.now()) }
 

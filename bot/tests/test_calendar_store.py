@@ -162,3 +162,104 @@ def test_clear_missed_chores_deletes_only_unticked_past_ones():
     assert cs.FamilyCalendar(svc, "cal", TZ).clear_missed_chores(date(2026, 11, 15)) == 2
     deleted = [kw["eventId"] for name, kw in svc.ev.calls if name == "delete"]
     assert deleted == ["old_open", "rep_20261114"]
+
+
+# ---------- Family Chores calendar ----------
+
+
+class NotFound(Exception):
+    """Looks like googleapiclient's HttpError for a 404."""
+
+    class resp:  # noqa: N801
+        status = 404
+
+
+class TwoCalendars(FakeEvents):
+    """Events per calendar id; answers list/get/patch/delete per calendar."""
+
+    def __init__(self, by_cal):
+        super().__init__()
+        self.by_cal = by_cal
+        self._next = {}
+
+    def list(self, **kw):
+        self._next = {"items": self.by_cal.get(kw["calendarId"], [])}
+        return self._call("list", **kw)
+
+    def get(self, **kw):
+        match = [e for e in self.by_cal.get(kw["calendarId"], []) if e["id"] == kw["eventId"]]
+        self._next = match[0] if match else NotFound()
+        return self._call("get", **kw)
+
+    def delete(self, **kw):
+        self._next = {}
+        return self._call("delete", **kw)
+
+    def execute(self):
+        out, self._next = self._next, {}
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+
+def two_cal_service(family, chores):
+    svc = FakeService()
+    svc.ev = TwoCalendars({"fam": family, "chores": chores})
+    return svc
+
+
+def test_add_chore_goes_to_chores_calendar_without_reminder():
+    svc = FakeService()
+    cs.FamilyCalendar(svc, "fam", TZ, "chores").add_chore(date(2026, 10, 7), "Bins", "Erlina", "Sally")
+    (name, kw), = svc.ev.calls
+    assert kw["calendarId"] == "chores"
+    assert kw["body"]["reminders"] == {"useDefault": False, "overrides": []}
+
+
+def test_blank_chores_id_keeps_one_calendar():
+    svc = FakeService()
+    fc = cs.FamilyCalendar(svc, "fam", TZ, "  ")
+    assert fc.calendar_ids == ["fam"]
+    fc.add_chore(date(2026, 10, 7), "Bins", None, None)
+    assert svc.ev.calls[0][1]["calendarId"] == "fam"
+
+
+def test_memos_and_dinners_stay_on_family():
+    from datetime import time
+    svc = FakeService()
+    fc = cs.FamilyCalendar(svc, "fam", TZ, "chores")
+    fc.send_memo("Milk", "Sally", "Julian")
+    fc.save_dinner(None, date(2026, 10, 7), time(18, 0), "Tacos", None)
+    assert [kw["calendarId"] for _, kw in svc.ev.calls] == ["fam", "fam"]
+
+
+def test_items_merge_both_calendars_in_order():
+    swim = {"id": "swim", "summary": "Swimming", "start": {"dateTime": "2026-11-14T16:00:00+10:00"},
+            "end": {"dateTime": "2026-11-14T17:00:00+10:00"}}
+    svc = two_cal_service([chore_ev("old", "2026-11-14"), swim], [chore_ev("new", "2026-11-13")])
+    items = cs.FamilyCalendar(svc, "fam", TZ, "chores").items(date(2026, 11, 13), date(2026, 11, 14))
+    assert [(i.event_id, i.calendar_id) for i in items] == [("new", "chores"), ("old", "fam"), ("swim", "fam")]
+
+
+def test_chore_still_on_family_is_ticked_and_cleared_there():
+    svc = two_cal_service([chore_ev("old", "2026-11-14")], [chore_ev("new", "2026-11-14")])
+    fc = cs.FamilyCalendar(svc, "fam", TZ, "chores")
+    old = fc.get("old")  # chores calendar says 404, Family has it
+    assert old.calendar_id == "fam"
+    fc.set_chore_done(old, True, "Erlina")
+    # The fake doesn't keep the tick, so both still look open and past.
+    assert fc.clear_missed_chores(date(2026, 11, 15)) == 2
+    writes = [(n, kw["calendarId"], kw["eventId"]) for n, kw in svc.ev.calls if n in ("patch", "delete")]
+    assert writes == [("patch", "fam", "old"), ("delete", "fam", "old"), ("delete", "chores", "new")]
+
+
+def test_get_finds_moved_chore_on_chores_calendar_first():
+    svc = two_cal_service([], [chore_ev("moved", "2026-11-14")])
+    assert cs.FamilyCalendar(svc, "fam", TZ, "chores").get("moved").calendar_id == "chores"
+
+
+def test_get_missing_everywhere_raises():
+    import pytest
+    svc = two_cal_service([], [])
+    with pytest.raises(NotFound):
+        cs.FamilyCalendar(svc, "fam", TZ, "chores").get("gone")

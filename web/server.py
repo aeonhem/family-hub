@@ -297,7 +297,7 @@ def _calendar() -> cs.FamilyCalendar:
         token = BOT_DIR / token
     creds = Credentials.from_authorized_user_file(str(token))
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
-    return cs.FamilyCalendar(service, os.environ["FAMILY_CALENDAR_ID"], TZ)
+    return cs.FamilyCalendar(service, os.environ["FAMILY_CALENDAR_ID"], TZ, os.getenv("CHORES_CALENDAR_ID"))
 
 
 def _mailbox() -> school_mail.Mailbox | None:
