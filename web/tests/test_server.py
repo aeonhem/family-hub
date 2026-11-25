@@ -706,7 +706,7 @@ async def _owntracks_api(client):
     msg = {"_type": "location", "lat": -27.9, "lon": 153.3, "acc": 15, "batt": 55, "tst": tst, "tid": "ER"}
     # Basic auth with a family name and the family passcode, nothing else.
     for bad in ({}, basic("erlina", "parents"),
-                basic("bob", "family"), parents):
+                basic("bob", "family"), basic("sally", "family"), parents):
         resp = await client.post("/api/owntracks", json=msg, headers=bad)
         assert resp.status == 401
     assert "Basic" in resp.headers["WWW-Authenticate"]
@@ -732,3 +732,7 @@ async def _owntracks_api(client):
     for bad in ({**msg, "lat": 200}, {**msg, "tst": None}, {**msg, "tst": True}):
         assert (await client.post("/api/owntracks", json=bad, headers=erlina)).status == 400
     assert (await client.post("/api/owntracks", data="{not json", headers=erlina)).status == 400
+    # Wrong passwords share the login lockout, so the passcode cannot be guessed here.
+    for _ in range(server.MAX_LOGIN_FAILURES):
+        await client.post("/api/owntracks", json=msg, headers=basic("erlina", "guess"))
+    assert (await client.post("/api/owntracks", json=msg, headers=erlina)).status == 429

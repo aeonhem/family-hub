@@ -649,23 +649,34 @@ class Hub:
     async def locations_list(self, request: web.Request) -> web.Response:
         return web.json_response({"people": self.locations.everyone(), "now": int(clock.time() * 1000)})
 
-    def _owntracks_person(self, request: web.Request) -> str:
-        """The family member from OwnTracks' Basic auth: user = a name in lower
-        case ("erlina"), password = the family passcode."""
+    async def _owntracks_person(self, request: web.Request) -> str:
+        """OwnTracks' Basic auth: user = the kid's name in lower case ("erlina"),
+        password = the family passcode. Only the kid: the parents share from the
+        Android app with their own passcode, so the family passcode cannot move
+        a parent on the map. Wrong tries count toward the same lockout as login."""
+        ip = request.headers.get("X-Forwarded-For", request.remote or "").split(",")[0].strip()
+        now = clock.monotonic()
+        recent = [t for t in self.failures.get(ip, []) if now - t < LOCKOUT]
+        if len(recent) >= MAX_LOGIN_FAILURES:
+            raise web.HTTPTooManyRequests(text="Too many tries. Wait 15 minutes.")
         try:
             creds = BasicAuth.decode(request.headers.get("Authorization", ""))
         except ValueError:
             creds = None
-        person = next((p for p in FAMILY if creds and creds.login.strip().lower() == p.lower()), None)
-        if not person or not hmac.compare_digest(creds.password.strip().encode(), self.passcode.encode()):
-            raise web.HTTPUnauthorized(text="Passcode needed", headers={"WWW-Authenticate": 'Basic realm="Family Hub"'})
-        return person
+        if creds and creds.login.strip().lower() == KID.lower() and \
+                hmac.compare_digest(creds.password.strip().encode(), self.passcode.encode()):
+            self.failures.pop(ip, None)
+            return KID
+        if creds:  # a missing header is OwnTracks asking for the realm, not a guess
+            self.failures[ip] = recent + [now]
+            await asyncio.sleep(1)
+        raise web.HTTPUnauthorized(text="Passcode needed", headers={"WWW-Authenticate": 'Basic realm="Family Hub"'})
 
     async def owntracks(self, request: web.Request) -> web.Response:
         """OwnTracks in HTTP mode POSTs {_type: location, lat, lon, acc, batt, tst}.
         The reply holds the others' last positions, so OwnTracks shows them on its map.
         Other message types (and empty pings) store nothing but still get the reply."""
-        person = self._owntracks_person(request)
+        person = await self._owntracks_person(request)
         raw = await request.text()
         try:
             body = json.loads(raw) if raw.strip() else {}
