@@ -15,9 +15,12 @@ Build a small location feature into the parts we already have:
 - **Family server** (`web/server.py`): three new endpoints and one small
   SQLite file. It keeps the last position of each person, plus a short
   history if Julian wants one.
-- **Web app** (Erlina): a **Map** tab that shows the parents' last
-  positions. Her own iPhone can share only while the page is open (see 6).
-- **Discord bot**: optional `/where` command later. Not in the first step.
+- **Erlina (iPhone)**: the free OwnTracks app sends her position to our
+  server in the background and shows the family on its own map (see 6).
+  The web app gets a read-only **Map** tab too.
+- **Place alerts** ("Sally got home"): the server checks each new position
+  against saved places and sends an alert. This is a later step.
+- **Discord bot**: no location features (Julian's decision).
 
 Do not install OpenBeacon or openfamily on the server. Use both only as a
 reference for the Android background location code and the battery rules.
@@ -140,11 +143,8 @@ time.
   sharing on their own phone. Nobody can turn it on for someone else.
 - **Pause** switch: stop sharing for 1 h / until tomorrow / until I turn it
   back on. The server then shows "paused", not the old position.
-- **Who sees whom.** Proposed: everyone in the family sees everyone who
-  shares. Julian decides if Erlina sees the parents and if the parents see
-  Erlina (see 9).
-- **History.** Proposed default: **no history**, only the last position.
-  If history is wanted: 7 days maximum, then deleted every night.
+- **Who sees whom.** Everyone in the family sees everyone who shares.
+- **History.** None. Each new position replaces the old one.
 - **Data stays on our server.** No third-party location service. The phone
   talks only to `34-69-120-131.sslip.io`. Google sees only the FCM wake
   message (no position inside it). OSM tile servers see which map area is
@@ -182,11 +182,52 @@ things matter more than the interval:
   `FOREGROUND_SERVICE_LOCATION` permission and service type.
 - **Erlina (iPhone, no app).** A home-screen web app cannot share location
   in the background on iOS. It can send her position only while the page
-  is open and she taps "Share now". The bot cannot read her location. Real
-  background sharing from her iPhone needs a native iOS app (App Store or a
-  paid Apple developer account) or a third-party app such as OwnTracks
-  (free, open source, can post to our server over HTTP). OwnTracks is the
-  most realistic option if Julian wants Erlina on the map.
+  is open. Julian finds that too annoying, so the plan uses OwnTracks.
+
+### OwnTracks for Erlina
+
+OwnTracks is a free, open-source location app on the App Store
+(github.com/owntracks/ios, active in 2026). It has no company server of its
+own. You type in the address of *your* server, and it sends positions there.
+
+- **HTTP mode.** In Settings → Connection, mode "HTTP", URL
+  `https://34-69-120-131.sslip.io/api/owntracks`, user `erlina`, password =
+  the family passcode. It POSTs a small JSON message
+  (`{"_type":"location","lat":..,"lon":..,"acc":..,"batt":..,"tst":..}`)
+  with HTTP Basic auth over HTTPS. If there is no signal, it queues the
+  message and sends it later.
+- **Background on iOS.** Apple allows this for real apps. OwnTracks'
+  "significant changes" mode wakes on about 500 m of movement and is very
+  light on battery. "Move" mode is more exact but uses more battery. Erlina
+  must pick "Always" location for OwnTracks in iPhone settings.
+- **She sees the family too.** Our server's reply to each POST can contain
+  the parents' last positions. OwnTracks then shows them on its own map.
+  So OwnTracks is both her "share" and her "map", with no web app open.
+- **Place alerts.** OwnTracks also has regions with enter/leave events,
+  but we do the place check on the server for everyone, so it is the same
+  for all phones.
+- **Server work.** One extra endpoint, `POST /api/owntracks`, that accepts
+  Basic auth with the family passcode, maps user `erlina` to "Erlina",
+  stores the point like any other, and returns the others' positions as
+  OwnTracks `location` objects. Small: about 50 lines plus tests.
+- **Limits.** It is a second app on her phone, not Family Hub. It shows
+  updates only when it sends one (no live polling in HTTP mode). The
+  passcode is stored in the OwnTracks settings on her phone.
+
+### Why not a Family Hub iPhone app (yet)
+
+A native iPhone app can share location in the background, but:
+
+- Installing your own app on an iPhone needs a **Mac with Xcode**.
+- With a free Apple ID, the app **stops working after 7 days** and must be
+  installed again from the Mac each week.
+- Without that limit it needs the **Apple Developer Program, 99 USD a
+  year**, then TestFlight or ad-hoc install. That breaks "free".
+- It is a second app to write and keep (Swift, or a rewrite of the Android
+  app in a cross-platform tool).
+
+So: OwnTracks now. If Julian later pays for the developer account, an
+iPhone Family Hub app can replace OwnTracks with the same server endpoints.
 
 ## 7. Server load and disk
 
@@ -208,28 +249,34 @@ Estimate for 2 phones (3 with Erlina):
 
 ## 8. Steps (when Julian says go)
 
-1. Server: SQLite store, `POST /api/location`, `GET /api/locations`,
-   tests. No history yet.
+1. Server: SQLite `last` table only, `POST /api/location`,
+   `GET /api/locations`, tests.
 2. Android: permissions flow, `LocationService`, upload, pause, Map tab.
-3. Web app: Map tab (read only).
-4. FCM "locate now".
-5. Optional: history, places (home/school) with arrive/leave memos, bot
-   `/where`, OwnTracks endpoint for Erlina.
+3. Server: `POST /api/owntracks` for Erlina. Then set up OwnTracks on her
+   iPhone.
+4. Web app: read-only Map tab.
+5. FCM "locate now".
+6. Places and alerts: a `places` table (name, centre, radius, e.g. Home
+   100 m, School 150 m). The server keeps each person's "inside/outside"
+   state and, on a change, sends "Sally got home" to the others through
+   the existing FCM and Web Push paths. Add hysteresis (must be inside for
+   2 points or 2 min) so GPS jumps do not cause false alerts. Places are
+   set from the Android app's Map tab.
 
 Each step is its own PR. Run the scanner-triage skill before each deploy.
 
-## 9. Decisions for Julian
+## 9. Decisions (Julian, 2026-11-25)
 
-1. **Who sees whom?** Proposed: everyone sees everyone who shares. Does
-   Erlina see the parents? Do the parents see Erlina (only if she shares)?
-2. **History or last position only?** Proposed: last position only. If
-   history: how many days (proposed 7)?
-3. **Erlina on the map?** Options: no; "Share now" from the web app only;
-   or OwnTracks on her iPhone for background sharing.
-4. **Identity.** Accept "the phone says who it is" with the parents'
-   passcode, or add a per-phone secret (a little more work, safer)?
-5. **Map tiles.** Use the public OpenStreetMap tiles (free, light use,
-   attribution needed) or host our own later?
-6. **Discord `/where`.** Wanted or not? It shows positions in Discord,
-   which is a third-party service.
-7. **Places and alerts** ("Sally got home"): in a later step, or not at all?
+1. **Who sees whom:** everyone sees everyone who shares.
+2. **History:** none. The server keeps only each person's last position.
+   No `points` table, no history endpoint, no nightly clean-up job.
+3. **Erlina:** OwnTracks on her iPhone (background sharing, and she sees
+   the family in OwnTracks). The web app is not her main way to share. An
+   iPhone Family Hub app is parked: it needs a Mac and 99 USD a year (6).
+4. **Identity:** each phone says who it is. No per-phone secret.
+5. **Map tiles:** public OpenStreetMap tiles, with the attribution line.
+6. **Discord `/where`:** no.
+7. **Place alerts:** yes, as step 6.
+
+Still open: none for the first steps. For step 6, Julian picks the places
+and their radius.
