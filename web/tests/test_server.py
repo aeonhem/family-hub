@@ -598,3 +598,84 @@ def test_item_json_marks_repeating_chores():
     ev = cs.parse_event({"id": "r_20261115", "recurringEventId": "r", "summary": "☐ Dishwasher",
                          "start": {"date": "2026-11-15"}, "end": {"date": "2026-11-16"}}, TZ)
     assert server.item_json(ev)["repeats"] is True
+
+
+# ---------- where everyone is ----------
+
+import location  # noqa: E402
+
+NOW = 1_764_000_000_000
+
+
+def test_parse_point_checks_each_field():
+    p = location.parse_point({"lat": -27.97, "lon": 153.36, "t": NOW, "acc": 12, "battery": 80}, NOW)
+    assert p == location.Point(lat=-27.97, lon=153.36, at=NOW, acc=12.0, battery=80)
+    assert location.parse_point({"lat": 0, "lon": 0, "t": NOW}, NOW).acc is None
+    for bad in ({"lat": 91, "lon": 0, "t": NOW}, {"lat": 0, "lon": "1", "t": NOW}, {"lat": True, "lon": 0, "t": NOW},
+                {"lat": 0, "lon": 0}, {"lat": 0, "lon": 0, "t": NOW + 10 * 60 * 1000},
+                {"lat": 0, "lon": 0, "t": NOW, "battery": 101}, {"lat": 0, "lon": 0, "t": NOW, "acc": -1}, "x"):
+        try:
+            location.parse_point(bad, NOW)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted {bad}")
+
+
+def test_newest_keeps_the_latest_point():
+    pts = [{"lat": 1, "lon": 1, "t": NOW - 2000}, {"lat": 2, "lon": 2, "t": NOW}, {"lat": 3, "lon": 3, "t": NOW - 1000}]
+    assert location.newest(pts, NOW).lat == 2
+    for bad in ([], None, [{"lat": 0, "lon": 0, "t": NOW}] * (location.MAX_POINTS + 1)):
+        try:
+            location.newest(bad, NOW)
+        except ValueError:
+            continue
+        raise AssertionError("accepted a bad list")
+
+
+def test_locations_keep_only_the_last_position(tmp_path):
+    db = location.Locations(tmp_path / "location.db")
+    assert db.put("Sally", location.Point(1, 1, NOW))
+    assert not db.put("Sally", location.Point(9, 9, NOW - 1))  # an older, queued upload arrives late
+    assert db.put("Sally", location.Point(2, 2, NOW + 1, 5.0, 40))
+    db.put("Julian", location.Point(3, 3, NOW))
+    assert db.everyone() == [
+        {"person": "Julian", "lat": 3, "lon": 3, "at": NOW, "acc": None, "battery": None},
+        {"person": "Sally", "lat": 2, "lon": 2, "at": NOW + 1, "acc": 5.0, "battery": 40}]
+    assert db.db.execute("SELECT COUNT(*) FROM last").fetchone()[0] == 2  # no history rows
+    db.forget("Sally")
+    assert [r["person"] for r in db.everyone()] == ["Julian"]
+    db.close()
+    again = location.Locations(tmp_path / "location.db")  # kept across restarts
+    assert [r["person"] for r in again.everyone()] == ["Julian"]
+    again.close()
+
+
+def test_location_api(tmp_path):
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x", None, "parents")
+    run_client(hub, _location_api)
+
+
+async def _location_api(client):
+    family = {"Authorization": "Bearer " + (await (await client.post("/api/login", json={"passcode": "family"})).json())["token"]}
+    parents = {"Authorization": "Bearer " + (await (await client.post("/api/school/login", json={"passcode": "parents"})).json())["token"]}
+    now = int(server.clock.time() * 1000)
+    share = {"person": "Sally", "points": [{"lat": -27.97, "lon": 153.36, "t": now, "acc": 20, "battery": 77}]}
+    # Only the parents' phones share; nobody shares without a passcode.
+    assert (await client.post("/api/location", json=share)).status == 401
+    assert (await client.post("/api/location", json=share, headers=family)).status == 401
+    resp = await client.post("/api/location", json=share, headers=parents)
+    assert resp.status == 200 and (await resp.json())["kept"] is True
+    # Bad input is refused with a reason.
+    assert (await client.post("/api/location", json={**share, "person": "Bob"}, headers=parents)).status == 400
+    resp = await client.post("/api/location", json={"person": "Sally", "points": [{"lat": 200, "lon": 0, "t": now}]}, headers=parents)
+    assert resp.status == 400 and "lat" in await resp.text()
+    # Everyone sees the map: Erlina's web app and the parents' phones.
+    assert (await client.get("/api/locations")).status == 401
+    for who in (family, parents):
+        body = await (await client.get("/api/locations", headers=who)).json()
+        assert body["people"] == [{"person": "Sally", "lat": -27.97, "lon": 153.36, "at": now, "acc": 20.0, "battery": 77}]
+        assert body["now"] >= now
+    # Turning sharing off deletes the position.
+    resp = await client.post("/api/location", json={"person": "Sally", "sharing": False}, headers=parents)
+    assert resp.status == 200
+    assert (await (await client.get("/api/locations", headers=family)).json())["people"] == []

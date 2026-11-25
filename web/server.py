@@ -35,6 +35,7 @@ sys.path.insert(0, str(BOT_DIR))
 import calendar_store as cs  # noqa: E402
 import fcm  # noqa: E402
 import lights  # noqa: E402
+import location  # noqa: E402
 import school_mail  # noqa: E402
 import shopping  # noqa: E402
 
@@ -354,7 +355,8 @@ class Hub:
     def __init__(self, cal: cs.FamilyCalendar, store: Store, passcode: str, contact: str,
                  mailbox: school_mail.Mailbox | None = None, parent_passcode: str = "",
                  phones_sender: fcm.Sender | None = None, home_lights: lights.Lights | None = None,
-                 home_shopping: shopping.Shopping | None = None):
+                 home_shopping: shopping.Shopping | None = None,
+                 locations: location.Locations | None = None):
         self.cal = cal
         self.store = store
         self.passcode = passcode
@@ -375,6 +377,8 @@ class Hub:
         self.lights = home_lights
         # The family's Bring! shopping list, for everyone.
         self.shopping = home_shopping
+        # Each person's last shared position (no history), on this server only.
+        self.locations = locations or location.Locations(store.folder / "location.db")
         self.state: dict = store.read("state.json", {})
         self.weather_cache: dict | None = None
         self.weather_retry_at = 0.0
@@ -390,7 +394,11 @@ class Hub:
             parents_only = request.path.startswith(("/api/school", "/api/phone"))
             # The lights and shopping list are for everyone: Erlina's web app and the parents' Android app.
             need = [self.parent_token] if parents_only else [self.token]
-            if request.path.startswith(("/api/lights", "/api/shopping")):
+            # Only the Android app shares a position for now (Julian and Sally), so
+            # POST /api/location wants their passcode; everyone sees the map.
+            if request.path == "/api/location":
+                need = [self.parent_token]
+            if request.path.startswith(("/api/lights", "/api/shopping")) or request.path == "/api/locations":
                 need = [self.token, self.parent_token]
             if not any(n and hmac.compare_digest(given.encode(), n.encode()) for n in need):
                 raise web.HTTPUnauthorized(text="Passcode needed")
@@ -600,6 +608,27 @@ class Hub:
         self.store.write("phones.json", self.phones)
         return web.json_response({"ok": True, "push": self.fcm is not None})
 
+    # --- where everyone is (last position only) ---
+
+    async def location_share(self, request: web.Request) -> web.Response:
+        """A phone sends {person, points: [{lat, lon, t, acc?, battery?}]}, or
+        {person, sharing: false} to stop sharing, which deletes its position."""
+        body = await request.json()
+        person = name_or_none(body.get("person") if isinstance(body, dict) else None)
+        if not person:
+            raise web.HTTPBadRequest(text="Bad person")
+        if body.get("sharing") is False:
+            self.locations.forget(person)
+            return web.json_response({"ok": True, "kept": False})
+        try:
+            point = location.newest(body.get("points"), int(clock.time() * 1000))
+        except ValueError as e:
+            raise web.HTTPBadRequest(text=str(e))
+        return web.json_response({"ok": True, "kept": self.locations.put(person, point)})
+
+    async def locations_list(self, request: web.Request) -> web.Response:
+        return web.json_response({"people": self.locations.everyone(), "now": int(clock.time() * 1000)})
+
     async def phone_unregister(self, request: web.Request) -> web.Response:
         token = (await request.json()).get("token")
         self.phones = [p for p in self.phones if p["token"] != token]
@@ -726,6 +755,8 @@ def make_app(hub: Hub) -> web.Application:
     app.router.add_post("/api/shopping", hub.shopping_add)
     app.router.add_post("/api/shopping/{id}/done", hub.shopping_done)
     app.router.add_post("/api/shopping/{id}/urgent", hub.shopping_urgent)
+    app.router.add_post("/api/location", hub.location_share)
+    app.router.add_get("/api/locations", hub.locations_list)
 
     async def index(request):
         return web.FileResponse(STATIC / "index.html")
@@ -740,6 +771,10 @@ def make_app(hub: Hub) -> web.Application:
     app.cleanup_ctx.append(hub.watch)
     if hub.shopping:
         app.on_cleanup.append(lambda _: hub.shopping.close())
+
+    async def close_locations(_):
+        hub.locations.close()
+    app.on_cleanup.append(close_locations)
     return app
 
 
