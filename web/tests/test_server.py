@@ -679,3 +679,56 @@ async def _location_api(client):
     resp = await client.post("/api/location", json={"person": "Sally", "sharing": False}, headers=parents)
     assert resp.status == 200
     assert (await (await client.get("/api/locations", headers=family)).json())["people"] == []
+
+
+def test_owntracks_friends_leave_out_the_sender():
+    people = [{"person": "Erlina", "lat": 1.0, "lon": 2.0, "at": NOW, "acc": None, "battery": None},
+              {"person": "Sally", "lat": -27.5, "lon": 153.1, "at": NOW, "acc": 12.4, "battery": 60}]
+    assert server.owntracks_friends(people, "Erlina") == [
+        {"_type": "card", "name": "Sally", "topic": "owntracks/sally/phone"},
+        {"_type": "location", "tid": "SA", "topic": "owntracks/sally/phone",
+         "lat": -27.5, "lon": 153.1, "tst": NOW // 1000, "acc": 12, "batt": 60}]
+
+
+def test_owntracks_api(tmp_path):
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x", None, "parents")
+    run_client(hub, _owntracks_api)
+
+
+async def _owntracks_api(client):
+    import base64
+
+    def basic(user, pw):
+        return {"Authorization": "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()}
+    erlina = basic("erlina", "family")
+    parents = {"Authorization": "Bearer " + (await (await client.post("/api/school/login", json={"passcode": "parents"})).json())["token"]}
+    tst = int(server.clock.time())
+    msg = {"_type": "location", "lat": -27.9, "lon": 153.3, "acc": 15, "batt": 55, "tst": tst, "tid": "ER"}
+    # Basic auth with a family name and the family passcode, nothing else.
+    for bad in ({}, basic("erlina", "parents"),
+                basic("bob", "family"), parents):
+        resp = await client.post("/api/owntracks", json=msg, headers=bad)
+        assert resp.status == 401
+    assert "Basic" in resp.headers["WWW-Authenticate"]
+    # Sally shares from her Android phone; Erlina's OwnTracks post gets Sally back.
+    now = tst * 1000
+    await client.post("/api/location", json={"person": "Sally", "points": [{"lat": -27.5, "lon": 153.1, "t": now}]}, headers=parents)
+    resp = await client.post("/api/owntracks", json=msg, headers=erlina)
+    assert resp.status == 200
+    reply = await resp.json()
+    assert [o["_type"] for o in reply] == ["card", "location"] and reply[1]["tid"] == "SA"
+    family = {"Authorization": "Bearer " + (await (await client.post("/api/login", json={"passcode": "family"})).json())["token"]}
+    people = (await (await client.get("/api/locations", headers=family)).json())["people"]
+    assert {"person": "Erlina", "lat": -27.9, "lon": 153.3, "at": now, "acc": 15.0, "battery": 55} in people
+    # Empty pings and other message types store nothing and still get the friends.
+    for body in ("", '{"_type": "transition", "event": "enter"}'):
+        resp = await client.post("/api/owntracks", data=body, headers=erlina)
+        assert resp.status == 200 and len(await resp.json()) == 2
+    # Unknown battery (-1) is dropped; bad positions are refused.
+    resp = await client.post("/api/owntracks", json={**msg, "batt": -1, "tst": tst + 1}, headers=erlina)
+    assert resp.status == 200
+    people = (await (await client.get("/api/locations", headers=family)).json())["people"]
+    assert next(p for p in people if p["person"] == "Erlina")["battery"] is None
+    for bad in ({**msg, "lat": 200}, {**msg, "tst": None}, {**msg, "tst": True}):
+        assert (await client.post("/api/owntracks", json=bad, headers=erlina)).status == 400
+    assert (await client.post("/api/owntracks", data="{not json", headers=erlina)).status == 400

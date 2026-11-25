@@ -26,7 +26,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from aiohttp import web
+from aiohttp import BasicAuth, web
 from dotenv import load_dotenv
 
 HERE = Path(__file__).resolve().parent
@@ -234,6 +234,25 @@ def name_or_none(value) -> str | None:
     return value if value in FAMILY else None
 
 
+def owntracks_friends(people: list[dict], me: str) -> list[dict]:
+    """Everyone else's last position as OwnTracks objects. In HTTP mode the
+    topic tells friends apart, and the card gives each one a name."""
+    out = []
+    for p in people:
+        if p["person"] == me:
+            continue
+        topic = f"owntracks/{p['person'].lower()}/phone"
+        out.append({"_type": "card", "name": p["person"], "topic": topic})
+        loc = {"_type": "location", "tid": p["person"][:2].upper(), "topic": topic,
+               "lat": p["lat"], "lon": p["lon"], "tst": p["at"] // 1000}
+        if p.get("acc") is not None:
+            loc["acc"] = round(p["acc"])
+        if p.get("battery") is not None:
+            loc["batt"] = p["battery"]
+        out.append(loc)
+    return out
+
+
 # ---------- files on disk ----------
 
 class Store:
@@ -388,7 +407,8 @@ class Hub:
 
     @web.middleware
     async def auth(self, request: web.Request, handler):
-        if request.path.startswith("/api/") and request.path not in ("/api/login", "/api/school/login"):
+        # OwnTracks (Erlina's iPhone) can only send HTTP Basic auth; owntracks() checks it.
+        if request.path.startswith("/api/") and request.path not in ("/api/login", "/api/school/login", "/api/owntracks"):
             given = request.headers.get("Authorization", "").removeprefix("Bearer ")
             # The Android app is only on the parents' phones, so it uses their passcode.
             parents_only = request.path.startswith(("/api/school", "/api/phone"))
@@ -629,6 +649,41 @@ class Hub:
     async def locations_list(self, request: web.Request) -> web.Response:
         return web.json_response({"people": self.locations.everyone(), "now": int(clock.time() * 1000)})
 
+    def _owntracks_person(self, request: web.Request) -> str:
+        """The family member from OwnTracks' Basic auth: user = a name in lower
+        case ("erlina"), password = the family passcode."""
+        try:
+            creds = BasicAuth.decode(request.headers.get("Authorization", ""))
+        except ValueError:
+            creds = None
+        person = next((p for p in FAMILY if creds and creds.login.strip().lower() == p.lower()), None)
+        if not person or not hmac.compare_digest(creds.password.strip().encode(), self.passcode.encode()):
+            raise web.HTTPUnauthorized(text="Passcode needed", headers={"WWW-Authenticate": 'Basic realm="Family Hub"'})
+        return person
+
+    async def owntracks(self, request: web.Request) -> web.Response:
+        """OwnTracks in HTTP mode POSTs {_type: location, lat, lon, acc, batt, tst}.
+        The reply holds the others' last positions, so OwnTracks shows them on its map.
+        Other message types (and empty pings) store nothing but still get the reply."""
+        person = self._owntracks_person(request)
+        raw = await request.text()
+        try:
+            body = json.loads(raw) if raw.strip() else {}
+        except ValueError:
+            raise web.HTTPBadRequest(text="Bad JSON")
+        if isinstance(body, dict) and body.get("_type") == "location":
+            tst = body.get("tst")
+            raw_point = {"lat": body.get("lat"), "lon": body.get("lon"), "acc": body.get("acc"),
+                         "battery": body.get("batt"),
+                         "t": tst * 1000 if isinstance(tst, int) and not isinstance(tst, bool) else None}
+            if raw_point["battery"] == -1:  # OwnTracks' "unknown"
+                raw_point["battery"] = None
+            try:
+                self.locations.put(person, location.parse_point(raw_point, int(clock.time() * 1000)))
+            except ValueError as e:
+                raise web.HTTPBadRequest(text=str(e))
+        return web.json_response(owntracks_friends(self.locations.everyone(), person))
+
     async def phone_unregister(self, request: web.Request) -> web.Response:
         token = (await request.json()).get("token")
         self.phones = [p for p in self.phones if p["token"] != token]
@@ -757,6 +812,7 @@ def make_app(hub: Hub) -> web.Application:
     app.router.add_post("/api/shopping/{id}/urgent", hub.shopping_urgent)
     app.router.add_post("/api/location", hub.location_share)
     app.router.add_get("/api/locations", hub.locations_list)
+    app.router.add_post("/api/owntracks", hub.owntracks)
 
     async def index(request):
         return web.FileResponse(STATIC / "index.html")
