@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ShoppingCart
@@ -67,6 +68,7 @@ private enum class Tab(val label: String, val heading: String, val icon: ImageVe
     MEMOS("Memos", "Memos", Icons.Outlined.Campaign),
     SHOPPING("Shopping", "Shopping", Icons.Outlined.ShoppingCart, parentsOnly = true),
     LIGHTS("Lights", "Lights", Icons.Outlined.Lightbulb, parentsOnly = true),
+    MAP("Map", "Where everyone is", Icons.Outlined.Place, parentsOnly = true),
 }
 
 @Composable
@@ -169,6 +171,7 @@ private fun MainScaffold(vm: HubViewModel, s: HubState) {
                 Tab.MEMOS -> item { MemosScreen(s, vm) }
                 Tab.SHOPPING -> item { ShoppingScreen() }
                 Tab.LIGHTS -> item { LightsScreen() }
+                Tab.MAP -> item { MapScreen(s.me) }
             }
         }
     }

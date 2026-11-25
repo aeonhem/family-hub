@@ -598,3 +598,141 @@ def test_item_json_marks_repeating_chores():
     ev = cs.parse_event({"id": "r_20261115", "recurringEventId": "r", "summary": "☐ Dishwasher",
                          "start": {"date": "2026-11-15"}, "end": {"date": "2026-11-16"}}, TZ)
     assert server.item_json(ev)["repeats"] is True
+
+
+# ---------- where everyone is ----------
+
+import location  # noqa: E402
+
+NOW = 1_764_000_000_000
+
+
+def test_parse_point_checks_each_field():
+    p = location.parse_point({"lat": -27.97, "lon": 153.36, "t": NOW, "acc": 12, "battery": 80}, NOW)
+    assert p == location.Point(lat=-27.97, lon=153.36, at=NOW, acc=12.0, battery=80)
+    assert location.parse_point({"lat": 0, "lon": 0, "t": NOW}, NOW).acc is None
+    for bad in ({"lat": 91, "lon": 0, "t": NOW}, {"lat": 0, "lon": "1", "t": NOW}, {"lat": True, "lon": 0, "t": NOW},
+                {"lat": 0, "lon": 0}, {"lat": 0, "lon": 0, "t": NOW + 10 * 60 * 1000},
+                {"lat": 0, "lon": 0, "t": NOW, "battery": 101}, {"lat": 0, "lon": 0, "t": NOW, "acc": -1}, "x"):
+        try:
+            location.parse_point(bad, NOW)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted {bad}")
+
+
+def test_newest_keeps_the_latest_point():
+    pts = [{"lat": 1, "lon": 1, "t": NOW - 2000}, {"lat": 2, "lon": 2, "t": NOW}, {"lat": 3, "lon": 3, "t": NOW - 1000}]
+    assert location.newest(pts, NOW).lat == 2
+    for bad in ([], None, [{"lat": 0, "lon": 0, "t": NOW}] * (location.MAX_POINTS + 1)):
+        try:
+            location.newest(bad, NOW)
+        except ValueError:
+            continue
+        raise AssertionError("accepted a bad list")
+
+
+def test_locations_keep_only_the_last_position(tmp_path):
+    db = location.Locations(tmp_path / "location.db")
+    assert db.put("Sally", location.Point(1, 1, NOW))
+    assert not db.put("Sally", location.Point(9, 9, NOW - 1))  # an older, queued upload arrives late
+    assert db.put("Sally", location.Point(2, 2, NOW + 1, 5.0, 40))
+    db.put("Julian", location.Point(3, 3, NOW))
+    assert db.everyone() == [
+        {"person": "Julian", "lat": 3, "lon": 3, "at": NOW, "acc": None, "battery": None},
+        {"person": "Sally", "lat": 2, "lon": 2, "at": NOW + 1, "acc": 5.0, "battery": 40}]
+    assert db.db.execute("SELECT COUNT(*) FROM last").fetchone()[0] == 2  # no history rows
+    db.forget("Sally")
+    assert [r["person"] for r in db.everyone()] == ["Julian"]
+    db.close()
+    again = location.Locations(tmp_path / "location.db")  # kept across restarts
+    assert [r["person"] for r in again.everyone()] == ["Julian"]
+    again.close()
+
+
+def test_location_api(tmp_path):
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x", None, "parents")
+    run_client(hub, _location_api)
+
+
+async def _location_api(client):
+    family = {"Authorization": "Bearer " + (await (await client.post("/api/login", json={"passcode": "family"})).json())["token"]}
+    parents = {"Authorization": "Bearer " + (await (await client.post("/api/school/login", json={"passcode": "parents"})).json())["token"]}
+    now = int(server.clock.time() * 1000)
+    share = {"person": "Sally", "points": [{"lat": -27.97, "lon": 153.36, "t": now, "acc": 20, "battery": 77}]}
+    # Only the parents' phones share; nobody shares without a passcode.
+    assert (await client.post("/api/location", json=share)).status == 401
+    assert (await client.post("/api/location", json=share, headers=family)).status == 401
+    resp = await client.post("/api/location", json=share, headers=parents)
+    assert resp.status == 200 and (await resp.json())["kept"] is True
+    # Bad input is refused with a reason.
+    assert (await client.post("/api/location", json={**share, "person": "Bob"}, headers=parents)).status == 400
+    resp = await client.post("/api/location", json={"person": "Sally", "points": [{"lat": 200, "lon": 0, "t": now}]}, headers=parents)
+    assert resp.status == 400 and "lat" in await resp.text()
+    # Everyone sees the map: Erlina's web app and the parents' phones.
+    assert (await client.get("/api/locations")).status == 401
+    for who in (family, parents):
+        body = await (await client.get("/api/locations", headers=who)).json()
+        assert body["people"] == [{"person": "Sally", "lat": -27.97, "lon": 153.36, "at": now, "acc": 20.0, "battery": 77}]
+        assert body["now"] >= now
+    # Turning sharing off deletes the position.
+    resp = await client.post("/api/location", json={"person": "Sally", "sharing": False}, headers=parents)
+    assert resp.status == 200
+    assert (await (await client.get("/api/locations", headers=family)).json())["people"] == []
+
+
+def test_owntracks_friends_leave_out_the_sender():
+    people = [{"person": "Erlina", "lat": 1.0, "lon": 2.0, "at": NOW, "acc": None, "battery": None},
+              {"person": "Sally", "lat": -27.5, "lon": 153.1, "at": NOW, "acc": 12.4, "battery": 60}]
+    assert server.owntracks_friends(people, "Erlina") == [
+        {"_type": "card", "name": "Sally", "topic": "owntracks/sally/phone"},
+        {"_type": "location", "tid": "SA", "topic": "owntracks/sally/phone",
+         "lat": -27.5, "lon": 153.1, "tst": NOW // 1000, "acc": 12, "batt": 60}]
+
+
+def test_owntracks_api(tmp_path):
+    hub = server.Hub(None, server.Store(tmp_path), "family", "https://x", None, "parents")
+    run_client(hub, _owntracks_api)
+
+
+async def _owntracks_api(client):
+    import base64
+
+    def basic(user, pw):
+        return {"Authorization": "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()}
+    erlina = basic("erlina", "family")
+    parents = {"Authorization": "Bearer " + (await (await client.post("/api/school/login", json={"passcode": "parents"})).json())["token"]}
+    tst = int(server.clock.time())
+    msg = {"_type": "location", "lat": -27.9, "lon": 153.3, "acc": 15, "batt": 55, "tst": tst, "tid": "ER"}
+    # Basic auth with a family name and the family passcode, nothing else.
+    for bad in ({}, basic("erlina", "parents"),
+                basic("bob", "family"), basic("sally", "family"), parents):
+        resp = await client.post("/api/owntracks", json=msg, headers=bad)
+        assert resp.status == 401
+    assert "Basic" in resp.headers["WWW-Authenticate"]
+    # Sally shares from her Android phone; Erlina's OwnTracks post gets Sally back.
+    now = tst * 1000
+    await client.post("/api/location", json={"person": "Sally", "points": [{"lat": -27.5, "lon": 153.1, "t": now}]}, headers=parents)
+    resp = await client.post("/api/owntracks", json=msg, headers=erlina)
+    assert resp.status == 200
+    reply = await resp.json()
+    assert [o["_type"] for o in reply] == ["card", "location"] and reply[1]["tid"] == "SA"
+    family = {"Authorization": "Bearer " + (await (await client.post("/api/login", json={"passcode": "family"})).json())["token"]}
+    people = (await (await client.get("/api/locations", headers=family)).json())["people"]
+    assert {"person": "Erlina", "lat": -27.9, "lon": 153.3, "at": now, "acc": 15.0, "battery": 55} in people
+    # Empty pings and other message types store nothing and still get the friends.
+    for body in ("", '{"_type": "transition", "event": "enter"}'):
+        resp = await client.post("/api/owntracks", data=body, headers=erlina)
+        assert resp.status == 200 and len(await resp.json()) == 2
+    # Unknown battery (-1) is dropped; bad positions are refused.
+    resp = await client.post("/api/owntracks", json={**msg, "batt": -1, "tst": tst + 1}, headers=erlina)
+    assert resp.status == 200
+    people = (await (await client.get("/api/locations", headers=family)).json())["people"]
+    assert next(p for p in people if p["person"] == "Erlina")["battery"] is None
+    for bad in ({**msg, "lat": 200}, {**msg, "tst": None}, {**msg, "tst": True}):
+        assert (await client.post("/api/owntracks", json=bad, headers=erlina)).status == 400
+    assert (await client.post("/api/owntracks", data="{not json", headers=erlina)).status == 400
+    # Wrong passwords share the login lockout, so the passcode cannot be guessed here.
+    for _ in range(server.MAX_LOGIN_FAILURES):
+        await client.post("/api/owntracks", json=msg, headers=basic("erlina", "guess"))
+    assert (await client.post("/api/owntracks", json=msg, headers=erlina)).status == 429

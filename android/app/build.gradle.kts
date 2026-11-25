@@ -106,6 +106,9 @@ dependencies {
     // Memo push from the family server. Free, and wakes an idle phone.
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-messaging")
+    // Location sharing: the Fused Location Provider, and an OpenStreetMap map (no Google Maps key).
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
     testImplementation("junit:junit:4.13.2")
     // Android's own org.json is a stub in unit tests; this is the real one.
     testImplementation("org.json:json:20240303")

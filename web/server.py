@@ -26,7 +26,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from aiohttp import web
+from aiohttp import BasicAuth, web
 from dotenv import load_dotenv
 
 HERE = Path(__file__).resolve().parent
@@ -35,6 +35,7 @@ sys.path.insert(0, str(BOT_DIR))
 import calendar_store as cs  # noqa: E402
 import fcm  # noqa: E402
 import lights  # noqa: E402
+import location  # noqa: E402
 import school_mail  # noqa: E402
 import shopping  # noqa: E402
 
@@ -233,6 +234,25 @@ def name_or_none(value) -> str | None:
     return value if value in FAMILY else None
 
 
+def owntracks_friends(people: list[dict], me: str) -> list[dict]:
+    """Everyone else's last position as OwnTracks objects. In HTTP mode the
+    topic tells friends apart, and the card gives each one a name."""
+    out = []
+    for p in people:
+        if p["person"] == me:
+            continue
+        topic = f"owntracks/{p['person'].lower()}/phone"
+        out.append({"_type": "card", "name": p["person"], "topic": topic})
+        loc = {"_type": "location", "tid": p["person"][:2].upper(), "topic": topic,
+               "lat": p["lat"], "lon": p["lon"], "tst": p["at"] // 1000}
+        if p.get("acc") is not None:
+            loc["acc"] = round(p["acc"])
+        if p.get("battery") is not None:
+            loc["batt"] = p["battery"]
+        out.append(loc)
+    return out
+
+
 # ---------- files on disk ----------
 
 class Store:
@@ -354,7 +374,8 @@ class Hub:
     def __init__(self, cal: cs.FamilyCalendar, store: Store, passcode: str, contact: str,
                  mailbox: school_mail.Mailbox | None = None, parent_passcode: str = "",
                  phones_sender: fcm.Sender | None = None, home_lights: lights.Lights | None = None,
-                 home_shopping: shopping.Shopping | None = None):
+                 home_shopping: shopping.Shopping | None = None,
+                 locations: location.Locations | None = None):
         self.cal = cal
         self.store = store
         self.passcode = passcode
@@ -375,6 +396,8 @@ class Hub:
         self.lights = home_lights
         # The family's Bring! shopping list, for everyone.
         self.shopping = home_shopping
+        # Each person's last shared position (no history), on this server only.
+        self.locations = locations or location.Locations(store.folder / "location.db")
         self.state: dict = store.read("state.json", {})
         self.weather_cache: dict | None = None
         self.weather_retry_at = 0.0
@@ -384,13 +407,18 @@ class Hub:
 
     @web.middleware
     async def auth(self, request: web.Request, handler):
-        if request.path.startswith("/api/") and request.path not in ("/api/login", "/api/school/login"):
+        # OwnTracks (Erlina's iPhone) can only send HTTP Basic auth; owntracks() checks it.
+        if request.path.startswith("/api/") and request.path not in ("/api/login", "/api/school/login", "/api/owntracks"):
             given = request.headers.get("Authorization", "").removeprefix("Bearer ")
             # The Android app is only on the parents' phones, so it uses their passcode.
             parents_only = request.path.startswith(("/api/school", "/api/phone"))
             # The lights and shopping list are for everyone: Erlina's web app and the parents' Android app.
             need = [self.parent_token] if parents_only else [self.token]
-            if request.path.startswith(("/api/lights", "/api/shopping")):
+            # Only the Android app shares a position for now (Julian and Sally), so
+            # POST /api/location wants their passcode; everyone sees the map.
+            if request.path == "/api/location":
+                need = [self.parent_token]
+            if request.path.startswith(("/api/lights", "/api/shopping")) or request.path == "/api/locations":
                 need = [self.token, self.parent_token]
             if not any(n and hmac.compare_digest(given.encode(), n.encode()) for n in need):
                 raise web.HTTPUnauthorized(text="Passcode needed")
@@ -600,6 +628,73 @@ class Hub:
         self.store.write("phones.json", self.phones)
         return web.json_response({"ok": True, "push": self.fcm is not None})
 
+    # --- where everyone is (last position only) ---
+
+    async def location_share(self, request: web.Request) -> web.Response:
+        """A phone sends {person, points: [{lat, lon, t, acc?, battery?}]}, or
+        {person, sharing: false} to stop sharing, which deletes its position."""
+        body = await request.json()
+        person = name_or_none(body.get("person") if isinstance(body, dict) else None)
+        if not person:
+            raise web.HTTPBadRequest(text="Bad person")
+        if body.get("sharing") is False:
+            self.locations.forget(person)
+            return web.json_response({"ok": True, "kept": False})
+        try:
+            point = location.newest(body.get("points"), int(clock.time() * 1000))
+        except ValueError as e:
+            raise web.HTTPBadRequest(text=str(e))
+        return web.json_response({"ok": True, "kept": self.locations.put(person, point)})
+
+    async def locations_list(self, request: web.Request) -> web.Response:
+        return web.json_response({"people": self.locations.everyone(), "now": int(clock.time() * 1000)})
+
+    async def _owntracks_person(self, request: web.Request) -> str:
+        """OwnTracks' Basic auth: user = the kid's name in lower case ("erlina"),
+        password = the family passcode. Only the kid: the parents share from the
+        Android app with their own passcode, so the family passcode cannot move
+        a parent on the map. Wrong tries count toward the same lockout as login."""
+        ip = request.headers.get("X-Forwarded-For", request.remote or "").split(",")[0].strip()
+        now = clock.monotonic()
+        recent = [t for t in self.failures.get(ip, []) if now - t < LOCKOUT]
+        if len(recent) >= MAX_LOGIN_FAILURES:
+            raise web.HTTPTooManyRequests(text="Too many tries. Wait 15 minutes.")
+        try:
+            creds = BasicAuth.decode(request.headers.get("Authorization", ""))
+        except ValueError:
+            creds = None
+        if creds and creds.login.strip().lower() == KID.lower() and \
+                hmac.compare_digest(creds.password.strip().encode(), self.passcode.encode()):
+            self.failures.pop(ip, None)
+            return KID
+        if creds:  # a missing header is OwnTracks asking for the realm, not a guess
+            self.failures[ip] = recent + [now]
+            await asyncio.sleep(1)
+        raise web.HTTPUnauthorized(text="Passcode needed", headers={"WWW-Authenticate": 'Basic realm="Family Hub"'})
+
+    async def owntracks(self, request: web.Request) -> web.Response:
+        """OwnTracks in HTTP mode POSTs {_type: location, lat, lon, acc, batt, tst}.
+        The reply holds the others' last positions, so OwnTracks shows them on its map.
+        Other message types (and empty pings) store nothing but still get the reply."""
+        person = await self._owntracks_person(request)
+        raw = await request.text()
+        try:
+            body = json.loads(raw) if raw.strip() else {}
+        except ValueError:
+            raise web.HTTPBadRequest(text="Bad JSON")
+        if isinstance(body, dict) and body.get("_type") == "location":
+            tst = body.get("tst")
+            raw_point = {"lat": body.get("lat"), "lon": body.get("lon"), "acc": body.get("acc"),
+                         "battery": body.get("batt"),
+                         "t": tst * 1000 if isinstance(tst, int) and not isinstance(tst, bool) else None}
+            if raw_point["battery"] == -1:  # OwnTracks' "unknown"
+                raw_point["battery"] = None
+            try:
+                self.locations.put(person, location.parse_point(raw_point, int(clock.time() * 1000)))
+            except ValueError as e:
+                raise web.HTTPBadRequest(text=str(e))
+        return web.json_response(owntracks_friends(self.locations.everyone(), person))
+
     async def phone_unregister(self, request: web.Request) -> web.Response:
         token = (await request.json()).get("token")
         self.phones = [p for p in self.phones if p["token"] != token]
@@ -726,6 +821,9 @@ def make_app(hub: Hub) -> web.Application:
     app.router.add_post("/api/shopping", hub.shopping_add)
     app.router.add_post("/api/shopping/{id}/done", hub.shopping_done)
     app.router.add_post("/api/shopping/{id}/urgent", hub.shopping_urgent)
+    app.router.add_post("/api/location", hub.location_share)
+    app.router.add_get("/api/locations", hub.locations_list)
+    app.router.add_post("/api/owntracks", hub.owntracks)
 
     async def index(request):
         return web.FileResponse(STATIC / "index.html")
@@ -740,6 +838,10 @@ def make_app(hub: Hub) -> web.Application:
     app.cleanup_ctx.append(hub.watch)
     if hub.shopping:
         app.on_cleanup.append(lambda _: hub.shopping.close())
+
+    async def close_locations(_):
+        hub.locations.close()
+    app.on_cleanup.append(close_locations)
     return app
 
 
