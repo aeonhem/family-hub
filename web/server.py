@@ -398,6 +398,9 @@ class Hub:
         self.shopping = home_shopping
         # Each person's last shared position (no history), on this server only.
         self.locations = locations or location.Locations(store.folder / "location.db")
+        # Place alerts ("Sally left work"): places.json is set on the server by hand.
+        self.places = location.parse_places(store.read("places.json", []))
+        self.presence = location.Presence(store.read("presence.json", {}))
         self.state: dict = store.read("state.json", {})
         self.weather_cache: dict | None = None
         self.weather_retry_at = 0.0
@@ -644,7 +647,10 @@ class Hub:
             point = location.newest(body.get("points"), int(clock.time() * 1000))
         except ValueError as e:
             raise web.HTTPBadRequest(text=str(e))
-        return web.json_response({"ok": True, "kept": self.locations.put(person, point)})
+        kept = self.locations.put(person, point)
+        if kept:
+            await self.moved(person, point)
+        return web.json_response({"ok": True, "kept": kept})
 
     async def locations_list(self, request: web.Request) -> web.Response:
         return web.json_response({"people": self.locations.everyone(), "now": int(clock.time() * 1000)})
@@ -690,10 +696,26 @@ class Hub:
             if raw_point["battery"] == -1:  # OwnTracks' "unknown"
                 raw_point["battery"] = None
             try:
-                self.locations.put(person, location.parse_point(raw_point, int(clock.time() * 1000)))
+                point = location.parse_point(raw_point, int(clock.time() * 1000))
             except ValueError as e:
                 raise web.HTTPBadRequest(text=str(e))
+            if self.locations.put(person, point):
+                await self.moved(person, point)
         return web.json_response(owntracks_friends(self.locations.everyone(), person))
+
+    async def moved(self, person: str, point: location.Point) -> None:
+        """A new position: on leaving or reaching a place, tell everyone else."""
+        events, changed = self.presence.update(person, self.places, point)
+        if changed:
+            self.store.write("presence.json", self.presence.state)
+        when = datetime.fromtimestamp(point.at / 1000, TZ).strftime("%I:%M %p").lstrip("0").lower()
+        for kind, place in events:
+            title = f"{person} left {place}" if kind == "left" else f"{person} got to {place}"
+            log.info("place alert: %s %s", person, kind)
+            await self.push([s for s in self.subs if s["person"] != person],
+                            {"title": title, "body": f"at {when}", "tag": f"place-{person}", "url": "/"})
+            await self.push_phones([p for p in self.phones if p["person"] != person],
+                                   {"title": title, "body": f"at {when}", "begin": str(point.at // 1000)})
 
     async def phone_unregister(self, request: web.Request) -> web.Response:
         token = (await request.json()).get("token")
