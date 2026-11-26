@@ -299,7 +299,7 @@ function mainScreen() {
     </header>
     ${body}
   </main>
-  <nav class="nav">${TABS.map((t) => `
+  <nav class="nav">${navTabs().map((t) => `
     <button data-action="tab" data-tab="${t.id}" ${t.id === S.tab ? 'aria-current="page"' : ''}>
       <span class="pill-ind">${svg(t.icon)}</span>${t.label}
     </button>`).join('')}
@@ -630,11 +630,36 @@ function dialogHtml() {
   </div></div>`;
 }
 
+// ---------- tab order: each person's 3 most recent tabs first ----------
+// Worked out once per page load, so the buttons do not jump while you tap.
+
+const RECENT_KEEP = 3;
+const recentKey = () => 'recentTabs:' + (S.me || '');
+const recentTabs = () => (store.get(recentKey()) || '').split(',').filter(Boolean);
+
+function tabOrder(all, recent) {
+  const front = [...new Set(recent)].filter((id) => all.some((t) => t.id === id)).slice(0, RECENT_KEEP)
+    .map((id) => all.find((t) => t.id === id));
+  return front.concat(all.filter((t) => !front.includes(t)));
+}
+
+let navOrder = null;
+let navFor = null;
+function navTabs() {
+  if (!navOrder || navFor !== S.me) { navOrder = tabOrder(TABS, recentTabs()); navFor = S.me; }
+  return navOrder;
+}
+
+function noteTab(id) {
+  store.set(recentKey(), [id, ...recentTabs().filter((x) => x !== id)].slice(0, RECENT_KEEP).join(','));
+}
+
 // ---------- actions ----------
 
 const actions = {
   tab(el) {
     S.tab = el.dataset.tab; store.set('tab', S.tab);
+    noteTab(S.tab);
     history.replaceState(null, '', '/');
     render(); window.scrollTo(0, 0);
     loadLights(); loadShopping();

@@ -1,5 +1,15 @@
 package com.aeonhem.familyhub.ui
 
+import android.content.Context
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Surface
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import com.aeonhem.familyhub.data.RecentTabs
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,9 +43,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -102,11 +109,42 @@ fun FamilyHubApp(vm: HubViewModel, onRequestPermission: () -> Unit) {
     }
 }
 
+/** A big bottom-bar button: the bar scrolls sideways when they do not all fit. */
+@Composable
+private fun TabButton(t: Tab, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier.width(92.dp).clip(RoundedCornerShape(16.dp))
+            .semantics { this.selected = selected }
+            .clickable(role = Role.Tab, onClick = onClick)
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(width = 72.dp, height = 44.dp).clip(RoundedCornerShape(22.dp))
+                .background(if (selected) Hub.TealSoft else Color.Transparent),
+            contentAlignment = Alignment.Center,
+        ) { Icon(t.icon, contentDescription = null, tint = if (selected) Hub.Teal else Hub.Muted, modifier = Modifier.size(30.dp)) }
+        Text(
+            t.label, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1,
+            color = if (selected) Hub.TealText else Hub.Muted, modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
 @Composable
 private fun MainScaffold(vm: HubViewModel, s: HubState) {
     var tab by rememberSaveable { mutableStateOf(Tab.TODAY) }
     val parent = s.me == "Julian" || s.me == "Sally"
     val tabs = Tab.entries.filter { parent || !it.parentsOnly }
+    // Each person's 3 most recent tabs go first. The order is worked out once
+    // when the app opens, so the buttons do not jump while someone taps them.
+    val prefs = LocalContext.current.getSharedPreferences("familyhub", Context.MODE_PRIVATE)
+    val recentKey = RecentTabs.key(s.me ?: "")
+    val ordered = remember(s.me, parent) {
+        val recent = prefs.getString(recentKey, null)?.split(',').orEmpty()
+            .mapNotNull { n -> Tab.entries.firstOrNull { it.name == n } }
+        RecentTabs.order(tabs, recent)
+    }
     if (tab !in tabs) tab = Tab.TODAY
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     if (settingsOpen) SettingsDialog(vm, onDismiss = { settingsOpen = false })
@@ -118,21 +156,20 @@ private fun MainScaffold(vm: HubViewModel, s: HubState) {
         containerColor = Hub.Ground,
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            NavigationBar(containerColor = Hub.Card) {
-                tabs.forEach { t ->
-                    NavigationBarItem(
-                        selected = tab == t,
-                        onClick = { tab = t },
-                        icon = { Icon(t.icon, contentDescription = null) },
-                        label = { Text(t.label, fontWeight = FontWeight.Bold, maxLines = 1) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Hub.Teal,
-                            selectedTextColor = Hub.TealText,
-                            indicatorColor = Hub.TealSoft,
-                            unselectedIconColor = Hub.Muted,
-                            unselectedTextColor = Hub.Muted,
-                        ),
-                    )
+            Surface(color = Hub.Card, shadowElevation = 3.dp) {
+                Row(
+                    Modifier.fillMaxWidth().navigationBarsPadding()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    ordered.forEach { t ->
+                        TabButton(t, selected = tab == t) {
+                            tab = t
+                            val recent = prefs.getString(recentKey, null)?.split(',').orEmpty()
+                            prefs.edit().putString(recentKey, RecentTabs.used(recent, t.name).joinToString(",")).apply()
+                        }
+                    }
                 }
             }
         },
