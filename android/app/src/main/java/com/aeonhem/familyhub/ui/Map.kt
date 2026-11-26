@@ -325,6 +325,7 @@ private fun FamilyMap(people: List<Position>) {
                 setMultiTouchControls(true)
                 zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
                 controller.setZoom(12.0)
+                maxZoomLevel = 19.0 // OSM's last tile level; past it the map is grey
                 // Drags move the map, not the page around it.
                 setOnTouchListener { v, e ->
                     v.parent?.requestDisallowInterceptTouchEvent(e.action != MotionEvent.ACTION_UP && e.action != MotionEvent.ACTION_CANCEL)
@@ -336,6 +337,9 @@ private fun FamilyMap(people: List<Position>) {
         onRelease = { it.onDetach() },
     )
 }
+
+/** Closest zoom when fitting everyone: street level, with the streets around. */
+private const val FIT_MAX_ZOOM = 16.5
 
 private fun showPeople(map: MapView, people: List<Position>) {
     val key = people.joinToString { "${it.person}${it.at}" }
@@ -355,7 +359,11 @@ private fun showPeople(map: MapView, people: List<Position>) {
         when (points.size) {
             0 -> {}
             1 -> { map.controller.setZoom(15.0); map.controller.setCenter(points[0]) }
-            else -> map.zoomToBoundingBox(BoundingBox.fromGeoPoints(points).increaseByScale(1.4f), false, 64)
+            else -> {
+                map.zoomToBoundingBox(BoundingBox.fromGeoPoints(points).increaseByScale(1.4f), false, 64)
+                // People in the same house would zoom past the last tile level and show a grey map.
+                if (map.zoomLevelDouble > FIT_MAX_ZOOM) map.controller.setZoom(FIT_MAX_ZOOM)
+            }
         }
     }
 }
