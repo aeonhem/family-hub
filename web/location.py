@@ -7,6 +7,7 @@ logged.
 """
 from __future__ import annotations
 
+import math
 import sqlite3
 import time
 from dataclasses import asdict, dataclass
@@ -91,3 +92,83 @@ class Locations:
 
     def close(self) -> None:
         self.db.close()
+
+
+# ---------- places and alerts ("Sally left work") ----------
+# The places live in STATE_DIR/places.json on the server only (they are home
+# addresses, so they stay out of git): [{"name", "lat", "lon", "radius"}].
+
+LEAVE_MARGIN = 80  # metres past the radius before "left" counts, so GPS noise at the edge does not flip it
+MAX_ACC = 250  # metres; rougher fixes are too vague to say where someone is
+CONFIRM = 2  # points in a row that must agree before a change is announced
+
+
+@dataclass(frozen=True)
+class Place:
+    name: str
+    lat: float
+    lon: float
+    radius: float  # metres
+
+
+def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    a = (math.sin(math.radians(lat2 - lat1) / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
+         * math.sin(math.radians(lon2 - lon1) / 2) ** 2)
+    return 6_371_000 * 2 * math.asin(math.sqrt(a))
+
+
+def parse_places(raw) -> list[Place]:
+    """Places from places.json. A bad entry is skipped, not fatal."""
+    out = []
+    for r in raw if isinstance(raw, list) else []:
+        try:
+            out.append(Place(str(r["name"]), _number(r["lat"], -90, 90, "lat"), _number(r["lon"], -180, 180, "lon"),
+                             _number(r["radius"], 10, 5_000, "radius")))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def where(places: list[Place], p: Point, current: str | None) -> str | None:
+    """The place [p] is in. Someone already at a place stays there until they
+    are LEAVE_MARGIN past its edge."""
+    def near(pl: Place, extra: float) -> bool:
+        return distance_m(p.lat, p.lon, pl.lat, pl.lon) <= pl.radius + extra
+    for pl in places:
+        if pl.name == current and near(pl, LEAVE_MARGIN):
+            return current
+    return next((pl.name for pl in places if near(pl, 0)), None)
+
+
+class Presence:
+    """Which place each person is at, plus a change waiting for its second
+    point. [state] is plain JSON so the server can keep it across restarts:
+    {person: {"at": place or None, "maybe": place or None, "count": n}}."""
+
+    def __init__(self, state: dict | None = None):
+        self.state: dict = state if isinstance(state, dict) else {}
+
+    def update(self, person: str, places: list[Place], p: Point) -> tuple[list[tuple[str, str]], bool]:
+        """Returns (events, changed). Events are ("left", place) and
+        ("arrived", place). The first point for a person sets their place
+        without an alert."""
+        if not places or (p.acc is not None and p.acc > MAX_ACC):
+            return [], False
+        s = self.state.get(person)
+        if s is None:
+            self.state[person] = {"at": where(places, p, None), "maybe": None, "count": 0}
+            return [], True
+        now = where(places, p, s["at"])
+        if now == s["at"]:
+            changed = s["maybe"] is not None or s["count"] != 0
+            s["maybe"], s["count"] = None, 0
+            return [], changed
+        if now == s["maybe"]:
+            s["count"] += 1
+        else:
+            s["maybe"], s["count"] = now, 1
+        if s["count"] < CONFIRM:
+            return [], True
+        events = ([("left", s["at"])] if s["at"] else []) + ([("arrived", now)] if now else [])
+        s["at"], s["maybe"], s["count"] = now, None, 0
+        return events, True

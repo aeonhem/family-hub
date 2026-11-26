@@ -736,3 +736,76 @@ async def _owntracks_api(client):
     for _ in range(server.MAX_LOGIN_FAILURES):
         await client.post("/api/owntracks", json=msg, headers=basic("erlina", "guess"))
     assert (await client.post("/api/owntracks", json=msg, headers=erlina)).status == 429
+
+
+# ---------- place alerts ----------
+
+WORK = location.Place("Sally's work", -27.9765, 153.3439, 150)
+HOME = location.Place("Sally's house", -27.9820, 153.3680, 120)
+
+
+def at(place, metres_north=0.0, acc=20.0, t=NOW):
+    return location.Point(place.lat + metres_north / 111_195, place.lon, t, acc)
+
+
+def test_presence_needs_two_points_and_a_margin():
+    pr = location.Presence()
+    places = [WORK, HOME]
+    assert pr.update("Sally", places, at(WORK)) == ([], True)  # first point: no alert
+    assert pr.state["Sally"]["at"] == "Sally's work"
+    # Just past the edge is GPS noise, not leaving.
+    assert pr.update("Sally", places, at(WORK, 200))[0] == []
+    assert pr.update("Sally", places, at(WORK, 200))[0] == []
+    # One far point alone does nothing; the second one confirms it.
+    assert pr.update("Sally", places, at(WORK, 600))[0] == []
+    assert pr.update("Sally", places, at(WORK, 600))[0] == [("left", "Sally's work")]
+    # A rough fix is ignored; then two points at home say she got there.
+    assert pr.update("Sally", places, at(HOME, acc=900)) == ([], False)
+    assert pr.update("Sally", places, at(HOME))[0] == []
+    assert pr.update("Sally", places, at(HOME))[0] == [("arrived", "Sally's house")]
+    # A single jump away and back does not alert.
+    assert pr.update("Sally", places, at(HOME, 2000))[0] == []
+    assert pr.update("Sally", places, at(HOME))[0] == []
+    assert pr.update("Sally", places, at(HOME, 2000))[0] == []
+    # Straight from one place to another: left, then arrived.
+    big = location.Place("Big", HOME.lat, HOME.lon, 3000)
+    pr2 = location.Presence({"Sally": {"at": "Sally's work", "maybe": None, "count": 0}})
+    assert pr2.update("Sally", [WORK, big], at(HOME))[0] == []
+    assert pr2.update("Sally", [WORK, big], at(HOME))[0] == [("left", "Sally's work"), ("arrived", "Big")]
+
+
+def test_parse_places_skips_bad_entries():
+    raw = [{"name": "A", "lat": 1, "lon": 2, "radius": 100}, {"name": "B", "lat": 200, "lon": 2, "radius": 100},
+           {"lat": 1}, "x"]
+    assert location.parse_places(raw) == [location.Place("A", 1.0, 2.0, 100.0)]
+    assert location.parse_places({"not": "a list"}) == []
+
+
+def test_place_alerts_go_to_everyone_else(tmp_path):
+    store = server.Store(tmp_path)
+    store.write("places.json", [{"name": WORK.name, "lat": WORK.lat, "lon": WORK.lon, "radius": WORK.radius}])
+    hub = server.Hub(None, store, "family", "https://x", None, "parents")
+    hub.subs = [{"person": "Erlina", "sub": {"endpoint": "e"}}, {"person": "Sally", "sub": {"endpoint": "s"}}]
+    hub.phones = [{"person": "Julian", "token": "j"}, {"person": "Sally", "token": "s"}]
+    sent, phoned = [], []
+
+    async def push(subs, payload):
+        sent.extend((s["person"], payload["title"]) for s in subs)
+
+    async def push_phones(phones, data):
+        phoned.extend((p["person"], data["title"], data["body"]) for p in phones)
+    hub.push, hub.push_phones = push, push_phones
+    run_client(hub, lambda c: _place_alerts(c, sent, phoned))
+    assert sent == [("Erlina", "Sally left Sally's work")]
+    assert [x[:2] for x in phoned] == [("Julian", "Sally left Sally's work")] and phoned[0][2].startswith("at ")
+    assert server.Store(tmp_path).read("presence.json", {})["Sally"]["at"] is None  # kept across restarts
+
+
+async def _place_alerts(client, sent, phoned):
+    parents = {"Authorization": "Bearer " + (await (await client.post("/api/school/login", json={"passcode": "parents"})).json())["token"]}
+    now = int(server.clock.time() * 1000)
+    for i, metres in enumerate((0, 900, 900)):
+        p = at(WORK, metres, t=now + i)
+        resp = await client.post("/api/location", headers=parents, json={
+            "person": "Sally", "points": [{"lat": p.lat, "lon": p.lon, "t": p.at, "acc": 20}]})
+        assert resp.status == 200
