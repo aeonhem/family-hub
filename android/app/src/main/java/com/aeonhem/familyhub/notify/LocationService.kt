@@ -115,7 +115,7 @@ class LocationService : Service() {
     private val uploads = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val recheck = Runnable { apply() }
-    private var requested: Long? = null // the interval asked for, null when not listening
+    private var requested: Pair<Long, Int>? = null // the interval and priority asked for, null when not listening
     private var last: Location? = null
 
     private val callback = object : LocationCallback() {
@@ -160,15 +160,15 @@ class LocationService : Service() {
     }
 
     private fun listen(intervalMs: Long) {
-        if (requested == intervalMs) return
-        val priority = if (intervalMs == LocationPolicy.MOVING_INTERVAL_MS) Priority.PRIORITY_HIGH_ACCURACY
+        val priority = if (LocationPolicy.highAccuracy(batterySaver())) Priority.PRIORITY_HIGH_ACCURACY
         else Priority.PRIORITY_BALANCED_POWER_ACCURACY
+        if (requested == intervalMs to priority) return
         val request = LocationRequest.Builder(priority, intervalMs)
             .setMinUpdateIntervalMillis(intervalMs / 2)
             .build()
         try {
             fused.requestLocationUpdates(request, callback, Looper.getMainLooper())
-            requested = intervalMs
+            requested = intervalMs to priority
         } catch (e: SecurityException) {
             Log.w("FamilyHub", "Location permission was taken away", e)
             stopSelf()

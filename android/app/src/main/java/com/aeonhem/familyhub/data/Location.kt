@@ -68,7 +68,7 @@ class LocationClient(private val base: String = FAMILY_SERVER) {
  * slower numbers: we keep no history, so only "where now" matters.
  */
 object LocationPolicy {
-    const val STILL_INTERVAL_MS = 2 * 60_000L // balanced power, about 100 m
+    const val STILL_INTERVAL_MS = 2 * 60_000L
     const val MOVING_INTERVAL_MS = 30_000L // high accuracy
     const val UPLOAD_EVERY_MS = 60_000L
     const val MOVING_SPEED_MPS = 1.0 // a brisk walk
@@ -86,6 +86,11 @@ object LocationPolicy {
     /** Battery saver keeps the slow, low-power setting even when moving. */
     fun intervalMs(moving: Boolean, batterySaver: Boolean) =
         if (moving && !batterySaver) MOVING_INTERVAL_MS else STILL_INTERVAL_MS
+
+    /** GPS-level accuracy (about 10-20 m) moving or still, so pins and place
+     *  alerts are right (Julian's choice, 2026-11-26). Battery saver drops to
+     *  the low-power setting, about 100 m. */
+    fun highAccuracy(batterySaver: Boolean) = !batterySaver
 
     fun shouldUpload(nowMs: Long, lastUploadMs: Long?) = lastUploadMs == null || nowMs - lastUploadMs >= UPLOAD_EVERY_MS
 }
