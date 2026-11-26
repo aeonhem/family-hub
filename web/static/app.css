@@ -17,7 +17,7 @@
   --memo-ink: #B4531C;
   --done-ink: #7A8480;
   --dialog: #F0F2EE;
-  --nav-h: 80px;
+  --nav-h: 96px;
   color-scheme: light;
 }
 
@@ -97,32 +97,35 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
   left: 0; right: 0; bottom: 0;
   background: var(--card);
   display: flex;
-  justify-content: center;
-  padding: 12px 0 calc(12px + env(safe-area-inset-bottom));
+  gap: 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: 10px 8px calc(10px + env(safe-area-inset-bottom));
   box-shadow: 0 -1px 3px rgba(28, 35, 33, 0.08);
   z-index: 5;
 }
+.nav::-webkit-scrollbar { display: none; }
 .nav button {
-  flex: 1;
-  min-width: 0;
-  max-width: 140px;
+  flex: 0 0 92px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  padding: 4px 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 700;
 }
 .nav .pill-ind {
-  width: 100%; max-width: 64px; height: 32px;
-  border-radius: 16px;
+  width: 72px; height: 44px;
+  border-radius: 22px;
   display: grid; place-items: center;
   transition: background-color 0.15s;
 }
 .nav button[aria-current="page"] { color: var(--teal-text); }
 .nav button[aria-current="page"] .pill-ind { background: var(--teal-soft); color: var(--teal); }
-.nav svg { width: 24px; height: 24px; fill: currentColor; }
+.nav svg { width: 30px; height: 30px; fill: currentColor; }
 
 /* ---------- Cards ---------- */
 
