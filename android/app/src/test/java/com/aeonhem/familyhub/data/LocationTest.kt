@@ -44,6 +44,8 @@ class LocationTest {
         assertEquals(LocationPolicy.MOVING_INTERVAL_MS, LocationPolicy.intervalMs(moving = true, batterySaver = false))
         assertEquals(LocationPolicy.STILL_INTERVAL_MS, LocationPolicy.intervalMs(moving = true, batterySaver = true))
         assertEquals(LocationPolicy.STILL_INTERVAL_MS, LocationPolicy.intervalMs(moving = false, batterySaver = false))
+        assertEquals(true, LocationPolicy.highAccuracy(batterySaver = false))
+        assertEquals(false, LocationPolicy.highAccuracy(batterySaver = true))
     }
 
     @Test
