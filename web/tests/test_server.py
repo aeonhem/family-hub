@@ -809,3 +809,73 @@ async def _place_alerts(client, sent, phoned):
         resp = await client.post("/api/location", headers=parents, json={
             "person": "Sally", "points": [{"lat": p.lat, "lon": p.lon, "t": p.at, "acc": 20}]})
         assert resp.status == 200
+
+
+# ---------- place lights ----------
+
+def test_parse_place_lights():
+    good = {"person": "Sally", "place": "Sally's house", "light": "Bedroom"}
+    raw = [good, {**good, "scene": "relax"},
+           {"person": "Sally", "place": "X"}, {"light": "L"}, "x", 5,
+           {**good, "scene": "no-such-scene"}]
+    assert location.parse_place_lights(raw, lights.SCENES) == [
+        location.PlaceLight("Sally", "Sally's house", "Bedroom"),
+        location.PlaceLight("Sally", "Sally's house", "Bedroom", "relax")]
+    assert location.parse_place_lights({"not": "a list"}, lights.SCENES) == []
+
+
+def test_light_actions():
+    rules = [location.PlaceLight("Sally", "Sally's house", "Bedroom", "relax"),
+             location.PlaceLight("Sally", "Sally's work", "Desk")]
+    arrived, left = ("arrived", "Sally's house"), ("left", "Sally's house")
+    assert location.light_actions(rules, "sally", [arrived]) == [("Bedroom", {"on": True, "scene": "relax"})]
+    assert location.light_actions(rules, "Sally", [("arrived", "Sally's work")]) == [("Desk", {"on": True})]
+    assert location.light_actions(rules, "Sally", [left]) == [("Bedroom", {"on": False})]
+    assert location.light_actions(rules, "Erlina", [arrived, left]) == []
+    assert location.light_actions(rules, "Sally", [("arrived", "Elsewhere")]) == []
+
+
+class TwoLights(FakeLights):
+    def list(self):
+        return [{"id": "d1", "name": "Bedroom"}, {"id": "d2", "name": "Hall"}]
+
+    def set(self, device_id, **change):
+        self.sent.append((device_id, change))
+
+
+class BrokenLights(TwoLights):
+    def set(self, device_id, **change):
+        raise RuntimeError("Tuya is down")
+
+
+def _place_lights_hub(tmp_path, fake):
+    store = server.Store(tmp_path)
+    store.write("places.json", [{"name": HOME.name, "lat": HOME.lat, "lon": HOME.lon, "radius": HOME.radius}])
+    store.write("place_lights.json", [
+        {"person": "Sally", "place": "Sally's house", "light": "Bedroom", "scene": "relax"}])
+    hub = server.Hub(None, store, "family", "https://x", None, "parents", None, fake)
+    assert hub.place_lights == [location.PlaceLight("Sally", "Sally's house", "Bedroom", "relax")]
+    return hub
+
+
+async def _place_lights_walk(client):
+    parents = {"Authorization": "Bearer " + (await (await client.post("/api/school/login", json={"passcode": "parents"})).json())["token"]}
+    now = int(server.clock.time() * 1000)
+    for i, metres in enumerate((0, 900, 900, 0, 0)):
+        p = at(HOME, metres, t=now + i)
+        resp = await client.post("/api/location", headers=parents, json={
+            "person": "Sally", "points": [{"lat": p.lat, "lon": p.lon, "t": p.at, "acc": 20}]})
+        assert resp.status == 200
+
+
+def test_place_lights_follow_sally(tmp_path):
+    fake = TwoLights()
+    hub = _place_lights_hub(tmp_path, fake)
+    run_client(hub, _place_lights_walk)
+    assert fake.sent == [("d1", {"on": False}), ("d1", {"on": True, "scene": "relax"})]
+
+
+def test_place_light_failures_do_not_break_the_upload(tmp_path):
+    for fake in (BrokenLights(), None):  # lights failing, and lights not set up
+        hub = _place_lights_hub(tmp_path, fake)
+        run_client(hub, _place_lights_walk)

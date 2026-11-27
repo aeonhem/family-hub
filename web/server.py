@@ -401,6 +401,8 @@ class Hub:
         # Place alerts ("Sally left work"): places.json is set on the server by hand.
         self.places = location.parse_places(store.read("places.json", []))
         self.presence = location.Presence(store.read("presence.json", {}))
+        # Lights that follow a person to and from a place, also set on the server by hand.
+        self.place_lights = location.parse_place_lights(store.read("place_lights.json", []), lights.SCENES)
         self.state: dict = store.read("state.json", {})
         self.weather_cache: dict | None = None
         self.weather_retry_at = 0.0
@@ -716,6 +718,22 @@ class Hub:
                             {"title": title, "body": f"at {when}", "tag": f"place-{person}", "url": "/"})
             await self.push_phones([p for p in self.phones if p["person"] != person],
                                    {"title": title, "body": f"at {when}", "begin": str(point.at // 1000)})
+        for name, change in location.light_actions(self.place_lights, person, events):
+            await self.place_light(name, change)
+
+    async def place_light(self, name: str, change: dict) -> None:
+        """Switches a light for a place rule. A failure is logged, never raised:
+        the position upload that caused it must still succeed."""
+        try:
+            found = await self._lights_call("list")
+            light = next((j for j in found if j["name"].lower() == name.lower()), None)
+            if not light:
+                log.warning("place light %r not found in Smart Life", name)
+                return
+            await self._lights_call("set", light["id"], **change)
+            log.info("place light: %s %s", name, "on" if change.get("on") else "off")
+        except Exception:
+            log.exception("place light %r failed", name)
 
     async def phone_unregister(self, request: web.Request) -> web.Response:
         token = (await request.json()).get("token")

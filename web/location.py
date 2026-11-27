@@ -172,3 +172,41 @@ class Presence:
         events = ([("left", s["at"])] if s["at"] else []) + ([("arrived", now)] if now else [])
         s["at"], s["maybe"], s["count"] = now, None, 0
         return events, True
+
+
+# ---------- place lights ("Bedroom on, Relax, when Sally gets home") ----------
+# STATE_DIR/place_lights.json, set on the server by hand next to places.json:
+# [{"person", "place", "light", "scene"?}]. On "arrived" the light turns on
+# (in the scene, if one is given); on "left" it turns off.
+
+
+@dataclass(frozen=True)
+class PlaceLight:
+    person: str
+    place: str
+    light: str  # the light's name in Smart Life
+    scene: str | None = None
+
+
+def parse_place_lights(raw, scenes) -> list[PlaceLight]:
+    """Rules from place_lights.json. A bad entry is skipped, not fatal."""
+    out = []
+    for r in raw if isinstance(raw, list) else []:
+        if not isinstance(r, dict) or not all(isinstance(r.get(k), str) and r[k] for k in ("person", "place", "light")):
+            continue
+        scene = r.get("scene")
+        if scene is not None and scene not in scenes:
+            continue
+        out.append(PlaceLight(r["person"], r["place"], r["light"], scene))
+    return out
+
+
+def light_actions(rules: list[PlaceLight], person: str, events) -> list[tuple[str, dict]]:
+    """(light name, change) for each rule an event matches, in event order."""
+    out = []
+    for kind, place in events:
+        for r in rules:
+            if r.person.lower() == person.lower() and r.place == place:
+                change = {"on": False} if kind == "left" else {"on": True, **({"scene": r.scene} if r.scene else {})}
+                out.append((r.light, change))
+    return out
